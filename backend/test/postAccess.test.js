@@ -7,7 +7,7 @@ import { canView } from '../src/routes/postRoutes.js';
 const originalBlockExists = Block.exists;
 const originalFollowExists = Follow.exists;
 
-test('public posts are searchable when their author is not blocked', async () => {
+test('Explore can show a public post from someone the viewer does not follow', async () => {
   Block.exists = async () => false;
   Follow.exists = async () => false;
   try {
