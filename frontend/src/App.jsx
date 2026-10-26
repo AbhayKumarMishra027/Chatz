@@ -167,34 +167,172 @@ function ExplorePage() {
   </div>;
 }
 
-function ProfilePage() {
-  const { user, refreshUser, logout } = useAuth();
-  const [form, setForm] = useState({ displayName: user.displayName, bio: user.bio || '', headline: user.headline || '', profileLink: user.profileLink || '', isPrivate: Boolean(user.isPrivate), messagePreference: user.messagePreference || 'followers' });
-  const [notice, setNotice] = useState('');
+function ProfileRelationshipModal({ username, kind, onClose }) {
+  const navigate = useNavigate();
+  const [users, setUsers] = useState([]);
+  const [cursor, setCursor] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState('');
+  const [actionUser, setActionUser] = useState('');
+  const [actionError, setActionError] = useState('');
+  async function load(nextCursor = null) {
+    if (nextCursor) setLoadingMore(true); else setLoading(true);
+    setError('');
+    try {
+      const suffix = nextCursor ? `?cursor=${encodeURIComponent(nextCursor)}` : '';
+      const { data } = await api.get(`/api/users/${encodeURIComponent(username)}/${kind}${suffix}`);
+      setUsers((current) => nextCursor ? [...current, ...data.users] : data.users);
+      setCursor(data.nextCursor || null);
+    } catch (requestError) { setError(getApiError(requestError)); }
+    finally { setLoading(false); setLoadingMore(false); }
+  }
+  useEffect(() => { load(); }, [username, kind]);
+  async function toggleFollow(person) {
+    setActionUser(person._id); setActionError('');
+    try {
+      const method = person.isFollowing || person.hasPendingFollowRequest ? 'delete' : 'post';
+      const { data } = await api.request({ method, url: `/api/users/${encodeURIComponent(person.username)}/follow` });
+      setUsers((current) => current.map((item) => item._id === person._id ? {
+        ...item, isFollowing: Boolean(data.following), hasPendingFollowRequest: Boolean(data.requestPending),
+      } : item));
+    } catch (requestError) { setActionError(getApiError(requestError)); }
+    finally { setActionUser(''); }
+  }
+  return <div className="profile-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="profile-relationship-modal" role="dialog" aria-modal="true" aria-labelledby="profile-list-title">
+      <header><div><span className="section-kicker">COMMUNITY</span><h2 id="profile-list-title">{kind === 'followers' ? 'Followers' : 'Following'}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close list"><X size={17} /></button></header>
+      {actionError && <p className="inline-error" role="alert">{actionError}</p>}
+      {error ? <div className="profile-list-state"><p role="alert">{error}</p><button className="outline-button" onClick={() => load()}>Try again</button></div>
+        : loading ? <div className="profile-list-state" role="status">Loading {kind}…</div>
+          : users.length === 0 ? <div className="profile-list-state"><strong>No {kind} yet</strong><span>This list is empty for now.</span></div>
+            : <div className="profile-relationship-list">{users.map((person) => <article className="profile-relationship-row" key={person._id}>
+              <button className="profile-list-person" onClick={() => { onClose(); navigate(`/u/${person.username}`); }}>
+                <span className="avatar avatar-you">{person.avatarUrl ? <img src={person.avatarUrl} alt="" /> : person.displayName.slice(0, 1).toUpperCase()}</span>
+                <span className="profile-list-identity"><strong>{person.displayName}</strong><small>@{person.username}</small></span>
+              </button>
+              <button className={`outline-button profile-list-follow${person.isFollowing ? ' is-following' : ''}`} disabled={actionUser === person._id} onClick={() => toggleFollow(person)}>
+                {actionUser === person._id ? 'Saving…' : person.isFollowing ? 'Following' : person.hasPendingFollowRequest ? 'Requested' : 'Follow'}
+              </button>
+            </article>)}</div>}
+      {cursor && !error && <button className="outline-button profile-list-more" disabled={loadingMore} onClick={() => load(cursor)}>{loadingMore ? 'Loading…' : 'Load more'}</button>}
+    </section>
+  </div>;
+}
+
+function ProfileHero({ profile, isSelf = false, onEdit, onFollow, onMessage, busy = false }) {
+  const [listKind, setListKind] = useState('');
+  return <section className="profile-hero">
+    <div className="profile-hero-avatar avatar profile-large">{profile.avatarUrl ? <img src={profile.avatarUrl} alt={`${profile.displayName}'s avatar`} /> : profile.displayName.slice(0, 1).toUpperCase()}</div>
+    <div className="profile-hero-main">
+      <div className="profile-hero-top">
+        <div className="profile-identity"><h2>{profile.displayName}</h2><span>@{profile.username}</span></div>
+        <div className="profile-actions">
+          {isSelf && onEdit && <button className="primary-button profile-edit-button" onClick={onEdit}>Edit Profile</button>}
+          {!isSelf && <>
+            <button className="outline-button" onClick={onFollow} disabled={busy}>{profile.isFollowing ? 'Unfollow' : profile.hasPendingFollowRequest ? 'Cancel request' : 'Follow'}</button>
+            <button className="primary-button profile-edit-button" onClick={onMessage}>Message</button>
+          </>}
+        </div>
+      </div>
+      {profile.canViewDetails ? <>
+        <div className="profile-stat-row"><button type="button" onClick={() => setListKind('followers')}><strong>{profile.followerCount ?? 0}</strong> followers</button><button type="button" onClick={() => setListKind('following')}><strong>{profile.followingCount ?? 0}</strong> following</button></div>
+        {profile.headline && <p className="profile-headline">{profile.headline}</p>}
+        {profile.bio && <p className="profile-bio">{profile.bio}</p>}
+        {profile.profileLink && <a className="profile-link" href={profile.profileLink} target="_blank" rel="noreferrer">{profile.profileLink}</a>}
+        {profile.isPrivate && <span className="profile-privacy-label">Private profile</span>}
+      </> : <p className="profile-private-note">This profile is private. Follow to see profile details and posts.</p>}
+    </div>
+    {listKind && <ProfileRelationshipModal username={profile.username} kind={listKind} onClose={() => setListKind('')} />}
+  </section>;
+}
+
+function ProfileEditModal({ profile, onClose, onSaved }) {
+  const [form, setForm] = useState({ displayName: profile.displayName, bio: profile.bio || '', headline: profile.headline || '', profileLink: profile.profileLink || '', isPrivate: Boolean(profile.isPrivate), messagePreference: profile.messagePreference || 'followers' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [followRequests, setFollowRequests] = useState([]);
-  useEffect(() => {
-    api.get('/api/users/follow-requests').then(({ data }) => setFollowRequests(data.requests))
-      .catch((requestError) => setError(getApiError(requestError)));
-  }, []);
-  function update(event) { const { name, value, checked, type } = event.target; setForm((current) => ({ ...current, [name]: type === 'checkbox' ? checked : value })); }
+  function update(event) {
+    const { name, value, checked, type } = event.target;
+    setForm((current) => ({ ...current, [name]: type === 'checkbox' ? checked : value }));
+  }
   async function save(event) {
-    event.preventDefault(); setBusy(true); setError(''); setNotice('');
-    try { await api.patch('/api/users/me', form); await refreshUser(); setNotice('Your profile has been updated.'); }
-    catch (requestError) { setError(getApiError(requestError)); }
-    finally { setBusy(false); }
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const { data } = await api.patch('/api/users/me', form);
+      await onSaved(data.user);
+    } catch (requestError) {
+      setError(getApiError(requestError));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <div className="profile-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="profile-edit-modal" role="dialog" aria-modal="true" aria-labelledby="profile-edit-title">
+      <header><div><span className="section-kicker">YOUR PROFILE</span><h2 id="profile-edit-title">Edit profile</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close edit profile"><X size={17} /></button></header>
+      <form className="profile-form" onSubmit={save}>
+        <label>Display name<input name="displayName" value={form.displayName} onChange={update} maxLength="60" required /></label>
+        <label>Headline<input name="headline" value={form.headline} onChange={update} maxLength="100" placeholder="A short line about what you do" /></label>
+        <label>Bio<textarea name="bio" value={form.bio} onChange={update} maxLength="280" rows="4" placeholder="A little about you" /></label>
+        <label>External link<input name="profileLink" type="url" value={form.profileLink} onChange={update} placeholder="https://example.com" /></label>
+        <label>Who can message you<select name="messagePreference" value={form.messagePreference} onChange={update}><option value="everyone">Everyone can send a request</option><option value="followers">Followers can message</option><option value="nobody">No new messages</option></select></label>
+        <label className="privacy-toggle"><input name="isPrivate" type="checkbox" checked={form.isPrivate} onChange={update} /><span>Private profile <small>Only your followers can view your posts and profile details.</small></span></label>
+        {error && <p className="inline-error" role="alert">{error}</p>}
+        <div className="profile-modal-actions"><button type="button" className="outline-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? 'Saving…' : 'Save profile'}</button></div>
+      </form>
+    </section>
+  </div>;
+}
+
+function ProfilePage() {
+  const { user, refreshUser } = useAuth();
+  const [profile, setProfile] = useState(null);
+  const [followRequests, setFollowRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [requestError, setRequestError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError('');
+    api.get(`/api/users/${user.username}`).then(({ data }) => { if (alive) setProfile(data.user); })
+      .catch((requestError) => { if (alive) setError(getApiError(requestError)); })
+      .finally(() => { if (alive) setLoading(false); });
+    api.get('/api/users/follow-requests').then(({ data }) => { if (alive) setFollowRequests(data.requests); })
+      .catch((requestError) => { if (alive) setRequestError(getApiError(requestError)); });
+    return () => { alive = false; };
+  }, [user.username]);
+  async function saveProfile(updatedUser) {
+    setProfile((current) => ({ ...current, ...updatedUser }));
+    setNotice('Your profile has been updated.');
+    setEditing(false);
+    refreshUser().catch(() => {});
   }
   async function decideRequest(requestId, decision) {
-    setError('');
+    setRequestError('');
     try {
       await api.patch(`/api/users/follow-requests/${requestId}`, { decision });
       setFollowRequests((current) => current.filter((request) => request._id !== requestId));
-    } catch (requestError) { setError(getApiError(requestError)); }
+      if (decision === 'approve') setProfile((current) => ({ ...current, followerCount: current.followerCount + 1 }));
+    } catch (requestError) { setRequestError(getApiError(requestError)); }
   }
-  return <div className="account-page"><form className="profile-form" onSubmit={save}><div className="profile-summary"><div className="avatar profile-large">{user.displayName.slice(0, 1).toUpperCase()}</div><div><strong>{user.displayName}</strong><span>@{user.username}</span></div></div><label>Display name<input name="displayName" value={form.displayName} onChange={update} maxLength="60" required /></label><label>Headline<input name="headline" value={form.headline} onChange={update} maxLength="100" placeholder="A short line about what you do" /></label><label>Bio<textarea name="bio" value={form.bio} onChange={update} maxLength="280" rows="4" placeholder="A little about you" /></label><label>External link<input name="profileLink" type="url" value={form.profileLink} onChange={update} placeholder="https://example.com" /></label><label>Who can message you<select name="messagePreference" value={form.messagePreference} onChange={update}><option value="everyone">Everyone can send a request</option><option value="followers">Followers can message</option><option value="nobody">No new messages</option></select></label><label className="privacy-toggle"><input name="isPrivate" type="checkbox" checked={form.isPrivate} onChange={update} /><span>Private profile <small>Only your followers can view your posts and profile details.</small></span></label>{error && <p className="inline-error" role="alert">{error}</p>}{notice && <p className="success-message" role="status">{notice}</p>}<button className="auth-submit" disabled={busy}>{busy ? 'Saving…' : 'Save profile'}<span>→</span></button></form>{followRequests.length > 0 && <section className="settings-card follow-requests"><span className="section-kicker">PRIVATE PROFILE</span><h2>Follow requests</h2>{followRequests.map((request) => <div className="follow-request-row" key={request._id}><div className="avatar avatar-you">{request.follower.displayName.slice(0, 1).toUpperCase()}</div><div><strong>{request.follower.displayName}</strong><span>@{request.follower.username}</span></div><button className="outline-button" onClick={() => decideRequest(request._id, 'reject')}>Reject</button><button className="primary-button" onClick={() => decideRequest(request._id, 'approve')}>Approve</button></div>)}</section>}<button className="outline-button account-signout" onClick={() => logout()}>Sign out</button></div>;
+  if (loading) return <div className="feed-loading">Opening your profile…</div>;
+  if (error || !profile) return <div className="social-empty"><h3>Profile unavailable.</h3><p>{error || 'We could not load your profile.'}</p></div>;
+  return <div className="profile-page">
+    <ProfileHero profile={profile} isSelf onEdit={() => setEditing(true)} />
+    {notice && <p className="success-message" role="status">{notice}</p>}
+    <SocialPage mode="profile" username={profile.username} />
+    {(followRequests.length > 0 || requestError) && <section className="settings-card follow-requests">
+      <span className="section-kicker">PRIVATE PROFILE</span><h2>Follow requests</h2>
+      {requestError && <p className="inline-error" role="alert">{requestError}</p>}
+      {followRequests.map((request) => <div className="follow-request-row" key={request._id}><div className="avatar avatar-you">{request.follower.displayName.slice(0, 1).toUpperCase()}</div><div><strong>{request.follower.displayName}</strong><span>@{request.follower.username}</span></div><button className="outline-button" onClick={() => decideRequest(request._id, 'reject')}>Reject</button><button className="primary-button" onClick={() => decideRequest(request._id, 'approve')}>Approve</button></div>)}
+    </section>}
+    {editing && <ProfileEditModal profile={profile} onClose={() => setEditing(false)} onSaved={saveProfile} />}
+  </div>;
 }
-
 function SettingsPage() {
   const [users, setUsers] = useState([]);
   const [error, setError] = useState('');
@@ -210,34 +348,58 @@ function PublicProfilePage({ username }) {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [composing, setComposing] = useState(false);
   const [notice, setNotice] = useState('');
-  useEffect(() => { api.get(`/api/users/${username}`).then(({ data }) => setProfile(data.user)).catch((requestError) => setError(getApiError(requestError))); }, [username]);
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError('');
+    api.get(`/api/users/${username}`).then(({ data }) => { if (alive) setProfile(data.user); })
+      .catch((requestError) => { if (alive) setError(getApiError(requestError)); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [username]);
   async function toggleFollow() {
-    setBusy(true); setError('');
+    setBusy(true);
+    setError('');
     try {
       const method = profile.isFollowing || profile.hasPendingFollowRequest ? 'delete' : 'post';
       const { data } = await api.request({ method, url: `/api/users/${username}/follow` });
-      setProfile((current) => ({ ...current, ...data, isFollowing: data.following,
+      setProfile((current) => ({ ...current, ...data, isFollowing: Boolean(data.following),
         hasPendingFollowRequest: Boolean(data.requestPending), canViewDetails: !current.isPrivate || Boolean(data.following) }));
-    }
-    catch (requestError) { setError(getApiError(requestError)); }
+    } catch (requestError) { setError(getApiError(requestError)); }
     finally { setBusy(false); }
   }
   async function sendMessage(event) {
-    event.preventDefault(); if (!message.trim()) return;
-    try { const { data } = await api.post(`/api/messages/${username}`, { text: message.trim() }); setMessage(''); setComposing(false); setNotice(data.status === 'pending' ? 'Message request sent.' : 'Message sent.'); if (data.status === 'accepted') navigate('/messages'); }
-    catch (requestError) { setError(getApiError(requestError)); }
+    event.preventDefault();
+    if (!message.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      const { data } = await api.post(`/api/messages/${username}`, { text: message.trim() });
+      setMessage('');
+      setComposing(false);
+      setNotice(data.status === 'pending' ? 'Message request sent.' : 'Message sent.');
+      if (data.status === 'accepted') navigate('/messages');
+    } catch (requestError) { setError(getApiError(requestError)); }
+    finally { setBusy(false); }
   }
+  if (loading) return <div className="feed-loading">Opening profile…</div>;
   if (error && !profile) return <div className="social-empty"><h3>Profile unavailable.</h3><p>{error}</p></div>;
-  if (!profile) return <div className="feed-loading">Opening profile…</div>;
+  if (!profile) return <div className="social-empty"><h3>Profile unavailable.</h3><p>We could not load this profile.</p></div>;
   const isSelf = profile._id === currentUser._id;
-  return <div className="public-profile"><section className="public-profile-card"><div className="avatar profile-large">{profile.displayName.slice(0, 1).toUpperCase()}</div><div className="public-profile-copy"><h2>{profile.displayName}</h2><span>@{profile.username}</span>{profile.canViewDetails && profile.headline && <p className="profile-headline">{profile.headline}</p>}{profile.canViewDetails && profile.bio && <p>{profile.bio}</p>}{profile.canViewDetails && profile.profileLink && <a href={profile.profileLink} target="_blank" rel="noreferrer">{profile.profileLink}</a>}{profile.canViewDetails && <div className="profile-counts"><span><strong>{profile.followerCount}</strong> followers</span><span><strong>{profile.followingCount}</strong> following</span></div>}{profile.isPrivate && !profile.canViewDetails && <p>This profile is private. Follow to see profile details and posts.</p>}</div>{!isSelf && <div className="public-profile-actions"><button className="outline-button" onClick={toggleFollow} disabled={busy}>{profile.isFollowing ? 'Following' : profile.hasPendingFollowRequest ? 'Requested' : 'Follow'}</button><button className="primary-button" onClick={() => setComposing((value) => !value)}>Message</button></div>}</section>{error && <p className="inline-error" role="alert">{error}</p>}{notice && <p className="success-message" role="status">{notice}</p>}{!isSelf && composing && <form className="first-message-form" onSubmit={sendMessage}><strong>Say hello to @{username}</strong><textarea value={message} onChange={(event) => setMessage(event.target.value)} maxLength="4000" placeholder="Write a thoughtful message…" required /><div><button type="button" className="text-button" onClick={() => setComposing(false)}>Cancel</button><button className="primary-button" disabled={!message.trim()}>Send message <span>→</span></button></div></form>}{profile.canViewDetails && <SocialPage mode="profile" username={username} />}</div>;
+  return <div className="profile-page public-profile">
+    <ProfileHero profile={profile} isSelf={isSelf} onEdit={() => navigate('/profile')} onFollow={toggleFollow} onMessage={() => setComposing((value) => !value)} busy={busy} />
+    {error && <p className="inline-error" role="alert">{error}</p>}
+    {notice && <p className="success-message" role="status">{notice}</p>}
+    {!isSelf && composing && <form className="first-message-form" onSubmit={sendMessage}><strong>Say hello to @{username}</strong><textarea value={message} onChange={(event) => setMessage(event.target.value)} maxLength="4000" placeholder="Write a thoughtful message…" required /><div><button type="button" className="text-button" onClick={() => setComposing(false)}>Cancel</button><button className="primary-button" disabled={busy || !message.trim()}>Send message <span>→</span></button></div></form>}
+    {profile.canViewDetails && <SocialPage mode="profile" username={username} />}
+  </div>;
 }
-
 function ComingSoon({ title, text, icon: Icon }) {
   return <div className="social-empty"><div className="empty-icon"><Icon size={18} /></div><h3>{title}</h3><p>{text}</p></div>;
 }
@@ -256,6 +418,7 @@ function MainContent() {
     '/settings': ['Settings', 'Make Chatz feel like your space.', Settings],
   };
   const [title, subtitle, Icon] = pages[pathname] || pages['/'];
+  if (pathname === '/profile') return <main className="main-content"><Topbar title={title} /><PageHeading eyebrow="YOUR SPACE" title="Your profile" subtitle="Your profile, posts, and account details." icon={Icon} /><div className="single-column-content profile-page-content"><ProfilePage /></div></main>;
   if (pathname === '/saved') return <main className="main-content"><Topbar title={title} /><PageHeading eyebrow="A LITTLE SPACE TO CONNECT" title={title} subtitle={subtitle} icon={Icon} /><div className="content-grid saved-content-grid"><section className="feed-column"><SocialPage mode="saved" /></section><HomeRightRail className="saved-right-rail" /></div></main>;
   if (pathname === '/messages') return <main className="main-content"><Topbar title={title} /><PageHeading eyebrow="GOOD CONVERSATIONS" title={title} subtitle={subtitle} icon={Icon} /><MessagesPage /></main>;
   if (pathname === '/notifications') return <main className="main-content"><Topbar title={title} /><PageHeading eyebrow="A LITTLE SPACE TO CONNECT" title={title} subtitle={subtitle} icon={Icon} /><div className="content-grid notifications-content-grid"><section className="feed-column"><NotificationsPage /></section><HomeRightRail className="notifications-right-rail" /></div></main>;

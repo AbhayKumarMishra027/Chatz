@@ -77,6 +77,52 @@ userRoutes.patch('/follow-requests/:requestId', requireAuth, requireClientOrigin
   } catch (error) { next(error); }
 });
 
+async function profileRelationshipList(req, res, next, direction) {
+  try {
+    const cursor = req.query.cursor;
+    if (cursor !== undefined && !/^[a-f\d]{24}$/i.test(cursor)) return res.status(400).json({ error: { message: 'Invalid list cursor.' } });
+    const profile = await User.findOne({ username: req.params.username.toLowerCase() }).select('_id isPrivate').lean();
+    if (!profile) return res.status(404).json({ error: { message: 'We could not find that profile.' } });
+    const isSelf = profile._id.toString() === req.user.id;
+    const ownerViewerBlock = { $or: [{ blocker: req.user._id, blocked: profile._id }, { blocker: profile._id, blocked: req.user._id }] };
+    if (!isSelf && await Block.exists(ownerViewerBlock)) return res.status(404).json({ error: { message: 'We could not find that profile.' } });
+    const accepted = isSelf || await hasAcceptedFollow(req.user._id, profile._id, Follow);
+    if (profile.isPrivate && !accepted) return res.status(403).json({ error: { message: 'This profile is private.' } });
+
+    const relationQuery = direction === 'followers' ? { following: profile._id } : { follower: profile._id };
+    if (cursor) relationQuery._id = { $lt: cursor };
+    const relations = await Follow.find(relationQuery).sort({ _id: -1 }).limit(31)
+      .populate(direction === 'followers' ? 'follower' : 'following', 'username displayName avatarUrl isPrivate').lean();
+    const hasMore = relations.length > 30;
+    const page = relations.slice(0, 30);
+    const people = page.map((relation) => relation[direction === 'followers' ? 'follower' : 'following']).filter(Boolean);
+    const personIds = people.map((person) => person._id);
+    const blockedRows = personIds.length ? await Block.find({ $or: [
+      { blocker: req.user._id, blocked: { $in: personIds } }, { blocker: { $in: personIds }, blocked: req.user._id },
+      { blocker: profile._id, blocked: { $in: personIds } }, { blocker: { $in: personIds }, blocked: profile._id },
+    ] }).select('blocker blocked').lean() : [];
+    const blockedPairs = new Set(blockedRows.map((row) => `${row.blocker}:${row.blocked}`));
+    const viewerFollows = personIds.length ? await Follow.find({ follower: req.user._id, following: { $in: personIds } }).select('following').lean() : [];
+    const visiblePrivateIds = new Set(viewerFollows.map((row) => row.following.toString()));
+    const isFollowingIds = visiblePrivateIds;
+    const pendingRows = personIds.length ? await FollowRequest.find({ follower: req.user._id, following: { $in: personIds } }).select('following').lean() : [];
+    const pendingIds = new Set(pendingRows.map((row) => row.following.toString()));
+    const users = people.filter((person) => {
+      const id = person._id.toString();
+      return (!person.isPrivate || visiblePrivateIds.has(id)) &&
+        !blockedPairs.has(`${req.user.id}:${id}`) && !blockedPairs.has(`${id}:${req.user.id}`) &&
+        !blockedPairs.has(`${profile._id}:${id}`) && !blockedPairs.has(`${id}:${profile._id}`);
+    }).map((person) => ({
+      _id: person._id, username: person.username, displayName: person.displayName, avatarUrl: person.avatarUrl,
+      isFollowing: isFollowingIds.has(person._id.toString()), hasPendingFollowRequest: pendingIds.has(person._id.toString()),
+    }));
+    res.json({ users, nextCursor: hasMore ? page[page.length - 1]?._id : null });
+  } catch (error) { next(error); }
+}
+
+userRoutes.get('/:username/followers', requireAuth, (req, res, next) => profileRelationshipList(req, res, next, 'followers'));
+userRoutes.get('/:username/following', requireAuth, (req, res, next) => profileRelationshipList(req, res, next, 'following'));
+
 userRoutes.get('/:username', requireAuth, async (req, res, next) => {
   try {
     const user = await User.findOne({ username: req.params.username.toLowerCase() });
