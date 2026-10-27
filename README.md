@@ -5,7 +5,7 @@
 🔗 **Live Application:** https://chatz-khaki.vercel.app  
 ⚙️ **Backend API:** https://chatz-ulbz.onrender.com  
 💻 **GitHub Repository:** https://github.com/AbhayKumarMishra027/Chatz  
-🎬 **Demo Video:** _Add the public 3–5 minute demo video link before submission._
+🎬 **Demo Video:** [Watch Chatz Demo](YOUR_GOOGLE_DRIVE_LINK)
 
 ---
 
@@ -353,13 +353,7 @@ Important manual checks include:
 - Mobile navigation and layout refinements remain planned.
 - The application does not currently claim end-to-end encryption, group conversations, voice/video calls, or a dedicated moderation dashboard.
 
-## 14. Demo Video
-
-A short demonstration of Chatz showcasing its key features and major workflows.
-
-**Demo Video:** [Watch Chatz Demo](YOUR_GOOGLE_DRIVE_LINK)
-
-## 15. Author
+## 14. Author
 
 **Abhay Kumar*
 
