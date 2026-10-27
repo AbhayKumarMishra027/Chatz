@@ -40,7 +40,15 @@ export default function MessagesPage({ initialConversationId = null, quickChat =
     socketRef.current = socket;
     socket.on('message:new', (message) => setMessages((current) => current.some((item) => item._id === message._id) ? current : [...current, message]));
     socket.on('read:update', ({ conversationId, userId: readerId }) => { if (active?._id === conversationId) setMessages((current) => current.map((item) => item.sender?._id === readerId ? item : ({ ...item, readBy: item.readBy.includes(readerId) ? item.readBy : [...item.readBy, readerId] }))); });
-    socket.on('message:changed', ({ messageId, action }) => setMessages((current) => current.map((item) => item._id !== messageId ? item : ({ ...item, text: action === 'deleted-for-everyone' ? 'This message was deleted.' : item.text, deletedForMe: action === 'deleted-for-me' || item.deletedForMe }))));
+    socket.on('message:changed', ({ messageId, conversationId, action }) => {
+      if (conversationId && active?._id !== conversationId) return;
+      setMessages((current) => current.map((item) => item._id !== messageId ? item : ({
+        ...item,
+        text: action === 'deleted-for-everyone' ? 'This message was deleted.' : action === 'deleted-for-me' ? 'You deleted this message.' : item.text,
+        deletedForEveryone: action === 'deleted-for-everyone' || item.deletedForEveryone,
+        deletedForMe: action === 'deleted-for-me' || item.deletedForMe,
+      })));
+    });
     socket.on('typing:update', ({ conversationId, userId, typing: activeTyping }) => { if (active?._id === conversationId && userId !== user._id) setTyping(activeTyping); });
     socket.on('conversation:update', () => loadInbox());
     socket.on('message-request:new', () => loadInbox());
@@ -129,6 +137,7 @@ export default function MessagesPage({ initialConversationId = null, quickChat =
   }
 
   async function deleteMessage(message, everyone = false) {
+    setError('');
     try {
       await api.delete(`/api/messages/message/${message._id}${everyone ? '/everyone' : ''}`);
       setMessages((current) => current.map((item) => item._id !== message._id ? item : ({ ...item, text: everyone ? 'This message was deleted.' : 'You deleted this message.', deletedForMe: !everyone, deletedForEveryone: everyone })));

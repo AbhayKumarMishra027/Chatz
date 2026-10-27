@@ -38,6 +38,9 @@
 @media(max-width:1020px){.notifications-right-rail{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:820px){.notifications-right-rail{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.notifications-right-rail{grid-template-columns:minmax(0,1fr)}}
+.messages-page-heading{padding:18px 0 14px}.messages-page-heading h1{font-size:24px}.messages-page-heading .heading-illustration{width:54px;height:54px}.messages-page-content .messages-layout{height:min(760px,calc(100vh - 205px))}
+@media(max-width:820px){.messages-page-heading{padding:14px 0 11px}.messages-page-heading h1{font-size:22px}.messages-page-heading .heading-illustration{width:48px;height:48px}.messages-page-content .messages-layout{height:calc(100vh - 190px);min-height:390px}}
+@media(max-width:560px){.messages-page-content .messages-layout{height:calc(100vh - 175px);min-height:360px}}
 .saved-content-grid>.feed-column,.saved-content-grid>.saved-right-rail{min-width:0}.saved-right-rail{align-content:start}
 @media(max-width:1020px){.saved-right-rail{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:820px){.saved-right-rail{grid-template-columns:repeat(2,minmax(0,1fr))}}

@@ -9,6 +9,7 @@ import { requireClientOrigin } from '../middleware/requireClientOrigin.js';
 import { canSendInConversation, canSendMessage, isBlockedEitherWay, isMutualFollow } from '../services/messaging.js';
 import { emitToConversation, emitToUser } from '../realtime/socketServer.js';
 import { createNotification } from '../services/notifications.js';
+import { deleteMessageForEveryone } from '../services/messageDeletion.js';
 
 export const messageRoutes = Router();
 messageRoutes.use(requireAuth);
@@ -85,7 +86,7 @@ messageRoutes.get('/', async (req, res, next) => {
       .sort({ lastMessageAt: -1 }).populate('participantA', userFields).populate('participantB', userFields);
     const conversations = await Promise.all(rows.map(async (conversation) => {
       const other = conversation.participantA._id.toString() === req.user.id ? conversation.participantB : conversation.participantA;
-      const unreadCount = await Message.countDocuments({ conversation: conversation._id, sender: { $ne: req.user._id }, readBy: { $ne: req.user._id }, deletedFor: { $ne: req.user._id } });
+      const unreadCount = await Message.countDocuments({ conversation: conversation._id, sender: { $ne: req.user._id }, readBy: { $ne: req.user._id }, deletedFor: { $ne: req.user._id }, deletedForEveryone: { $ne: true } });
       return { _id: conversation._id, participant: other, lastMessage: conversation.lastMessage, lastMessageAt: conversation.lastMessageAt, unreadCount };
     }));
     res.json({ conversations });
@@ -199,7 +200,7 @@ messageRoutes.delete('/message/:messageId', requireClientOrigin, async (req, res
     const conversation = await loadConversation(message.conversation, req.user._id);
     if (!conversation) return res.status(404).json({ error: { message: 'Message not found.' } });
     await Message.updateOne({ _id: message._id }, { $addToSet: { deletedFor: req.user._id } });
-    emitToUser(req.user._id, 'message:changed', { messageId: message.id, userId: req.user.id, action: 'deleted-for-me' });
+    emitToUser(req.user._id, 'message:changed', { messageId: message.id, conversationId: conversation.id, userId: req.user.id, action: 'deleted-for-me' });
     res.status(204).end();
   } catch (error) { next(error); }
 });
@@ -207,20 +208,22 @@ messageRoutes.delete('/message/:messageId', requireClientOrigin, async (req, res
 messageRoutes.delete('/message/:messageId/everyone', requireClientOrigin, async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.messageId)) return res.status(400).json({ error: { message: 'Invalid message ID.' } });
-    const message = await Message.findById(req.params.messageId);
-    if (!message) return res.status(404).json({ error: { message: 'Message not found.' } });
-    const conversation = await loadConversation(message.conversation, req.user._id);
-    if (!conversation) return res.status(404).json({ error: { message: 'Message not found.' } });
-    if (message.sender.toString() !== req.user.id) return res.status(403).json({ error: { message: 'Only the sender can delete this message for everyone.' } });
-    message.deletedForEveryone = true;
-    message.text = '';
-    await message.save();
-    const latest = await Message.findOne({ conversation: conversation._id }).sort({ createdAt: -1, _id: -1 }).select('text deletedForEveryone');
-    if (latest?._id.toString() === message._id.toString()) {
-      conversation.lastMessage = 'This message was deleted.';
-      await conversation.save();
+    const result = await deleteMessageForEveryone({ messageId: req.params.messageId, requesterId: req.user._id });
+    if (result.status === 'invalid-id') return res.status(400).json({ error: { message: 'Invalid message ID.' } });
+    if (result.status === 'not-found') return res.status(404).json({ error: { message: 'Message not found.' } });
+    if (result.status === 'forbidden') return res.status(403).json({ error: { message: 'Only the sender can delete this message for everyone.' } });
+    const deletionEvent = {
+      messageId: result.messageId, conversationId: result.conversationId, action: 'deleted-for-everyone',
+    };
+    // User rooms are joined on every authenticated socket connection. This
+    // delivers to both participants even if a conversation-room join was lost.
+    emitToUser(result.conversation.participantA, 'message:changed', deletionEvent);
+    emitToUser(result.conversation.participantB, 'message:changed', deletionEvent);
+    if (result.previewUpdated) {
+      const preview = { conversationId: result.conversationId, lastMessage: result.conversation.lastMessage, lastMessageAt: result.conversation.lastMessageAt };
+      emitToUser(result.conversation.participantA, 'conversation:update', preview);
+      emitToUser(result.conversation.participantB, 'conversation:update', preview);
     }
-    emitToConversation(conversation.id, 'message:changed', { messageId: message.id, action: 'deleted-for-everyone' });
     res.status(204).end();
   } catch (error) { next(error); }
 });
