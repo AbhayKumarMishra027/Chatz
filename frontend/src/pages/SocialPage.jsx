@@ -6,8 +6,12 @@ import Avatar from '../components/Avatar.jsx';
 import { useAuth } from '../features/auth/AuthContext.jsx';
 import { useParams } from 'react-router-dom';
 import { imageSelectionError, POST_IMAGE_MAX_BYTES } from '../utils/imageValidation.js';
+import { applyPostLikeState, submitPostLikeChange } from '../features/posts/postLike.js';
+import { postAuthorProfilePath, shouldLinkPostAuthor } from '../features/posts/postAuthorNavigation.js';
+import { getPostFollowAction } from '../features/posts/postFollowAction.js';
+import { publishFollowRelationshipChange, subscribeToFollowRelationshipChanges } from '../features/users/followSync.js';
 
-export function PostCard({ post, onChange, showOpenLink = false }) {
+export function PostCard({ post, onChange, onLikeChange, showOpenLink = false, linkAuthor = false, showFollow = false }) {
   const { user } = useAuth();
   const [comment, setComment] = useState('');
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -17,12 +21,42 @@ export function PostCard({ post, onChange, showOpenLink = false }) {
   const [reportReason, setReportReason] = useState('inappropriate');
   const [reportNotice, setReportNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
   const [error, setError] = useState('');
+  const likeRequestRef = useRef(false);
+  const followRequestRef = useRef(false);
   async function toggleLike() {
+    if (likeRequestRef.current) return;
+    likeRequestRef.current = true;
     setBusy(true); setError('');
-    try { await api.request({ method: post.likedByMe ? 'delete' : 'put', url: `/api/posts/${post._id}/like` }); onChange(); }
+    try {
+      await submitPostLikeChange({
+        post,
+        request: (config) => api.request(config),
+        onSuccess: (postId, likeState) => onLikeChange?.(postId, likeState),
+      });
+    }
     catch (requestError) { setError(getApiError(requestError)); }
-    finally { setBusy(false); }
+    finally { likeRequestRef.current = false; setBusy(false); }
+  }
+  async function toggleAuthorFollow(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (followRequestRef.current) return;
+    const username = post.author?.username;
+    const cancelRequest = Boolean(post.author?.hasPendingFollowRequest);
+    if (!username || String(post.author?._id) === String(user._id) || post.author?.isFollowing) return;
+    followRequestRef.current = true;
+    setFollowBusy(true);
+    setError('');
+    try {
+      const { data } = await api.request({
+        method: cancelRequest ? 'delete' : 'post',
+        url: `/api/users/${encodeURIComponent(username)}/follow`,
+      });
+      publishFollowRelationshipChange({ username, following: Boolean(data.following), requestPending: Boolean(data.requestPending) });
+    } catch (requestError) { setError(getApiError(requestError)); }
+    finally { followRequestRef.current = false; setFollowBusy(false); }
   }
   async function toggleSave() {
     setBusy(true); setError('');
@@ -54,7 +88,9 @@ export function PostCard({ post, onChange, showOpenLink = false }) {
     catch (requestError) { setError(getApiError(requestError)); }
   }
   const mine = post.author?._id === user._id;
-  return <article className="post-card"><header className="post-header"><Avatar className="post-avatar" src={post.author?.avatarUrl} name={post.author?.displayName || 'Chatz member'} userId={post.author?._id} size={40} /><div className="post-author"><strong>{post.author?.displayName || 'Chatz member'}</strong><span>@{post.author?.username || 'member'} · {new Date(post.createdAt).toLocaleDateString()}</span></div>{mine ? <div className="post-tools"><button onClick={() => { setEditText(post.text); setEditing((value) => !value); }} aria-label="Edit post"><Pencil size={13} /></button><button className="post-delete-action" onClick={deletePost} aria-label="Delete post"><Trash2 size={14} /></button></div> : <button className="post-report" onClick={() => setReporting((value) => !value)} aria-label="Report post"><Flag size={13} /></button>}</header>{editing ? <form className="edit-post-form" onSubmit={saveEdit}><textarea value={editText} onChange={(event) => setEditText(event.target.value)} maxLength="2000" required /><div><button type="button" className="text-button" onClick={() => setEditing(false)}>Cancel</button><button className="outline-button" disabled={busy || !editText.trim()}>Save edit</button></div></form> : post.text && <p className="post-text">{post.text}</p>}{post.image?.url && <figure className="post-image-frame"><img src={mediaUrl(post.image.url)} crossOrigin={mediaCrossOrigin(post.image.url)} alt={`Image shared by ${post.author?.displayName || 'a Chatz member'}`} loading="lazy" /></figure>}{reporting && <form className="report-form" onSubmit={reportPost}><label>Report reason<select value={reportReason} onChange={(event) => setReportReason(event.target.value)}><option value="inappropriate">Inappropriate content</option><option value="spam">Spam</option><option value="harassment">Harassment</option><option value="other">Other</option></select></label><button className="outline-button">Submit report</button></form>}{reportNotice && <p className="success-message">{reportNotice}</p>}<div className="post-actions"><button className={`post-action post-action-like${post.likedByMe ? ' selected' : ''}`} aria-pressed={Boolean(post.likedByMe)} onClick={toggleLike} disabled={busy} aria-label={post.likedByMe ? 'Unlike post' : 'Like post'}><Heart size={16} fill={post.likedByMe ? 'currentColor' : 'none'} />{post.likeCount || 0}</button><button className={`post-action post-action-comment${commentsOpen ? ' selected' : ''}`} aria-pressed={commentsOpen} onClick={() => setCommentsOpen((open) => !open)} aria-expanded={commentsOpen} aria-label={`${commentsOpen ? 'Hide' : 'Show'} ${post.comments?.length || 0} comments`}><MessageCircle size={16} />{post.comments?.length || 0}</button>{showOpenLink && <NavLink className="post-open-link" to={`/p/${post._id}`}>Open post</NavLink>}<button className={`post-action post-action-save save-action${post.isSaved ? ' selected' : ''}`} aria-pressed={Boolean(post.isSaved)} onClick={toggleSave} disabled={busy} aria-label={post.isSaved ? 'Remove saved post' : 'Save post'}><Bookmark size={16} fill={post.isSaved ? 'currentColor' : 'none'} /></button></div>{commentsOpen && <><div className="comment-list">{post.comments?.slice(-3).map((item) => <div className="comment" key={item._id}><Avatar className="comment-avatar" src={item.author?.avatarUrl} name={item.author?.displayName || 'Member'} userId={item.author?._id} size={30} /><div className="comment-copy"><strong>{item.author?.displayName || 'Member'}</strong><span>{item.text}</span></div></div>)}{!post.comments?.length && <p className="comments-empty">No comments yet. Start the conversation.</p>}</div><form className="comment-form" onSubmit={addComment}><input value={comment} onChange={(event) => setComment(event.target.value)} maxLength="1000" placeholder="Add a thoughtful comment…" aria-label="Add a comment" /><button disabled={busy || !comment.trim()} aria-label="Send comment"><Send size={15} /></button></form></>}{error && <p className="inline-error" role="alert">{error}</p>}</article>;
+  const followAction = getPostFollowAction(post.author, user._id);
+  const authorProfilePath = postAuthorProfilePath(post.author);
+  const authorIdentity = linkAuthor && authorProfilePath ? <NavLink className="post-author-link" to={authorProfilePath} aria-label={`Open ${post.author.displayName || post.author.username}'s profile`}><Avatar className="post-avatar" src={post.author?.avatarUrl} name={post.author?.displayName || 'Chatz member'} userId={post.author?._id} size={40} /><div className="post-author"><strong>{post.author?.displayName || 'Chatz member'}</strong><span>@{post.author?.username || 'member'} · {new Date(post.createdAt).toLocaleDateString()}</span></div></NavLink> : <><Avatar className="post-avatar" src={post.author?.avatarUrl} name={post.author?.displayName || 'Chatz member'} userId={post.author?._id} size={40} /><div className="post-author"><strong>{post.author?.displayName || 'Chatz member'}</strong><span>@{post.author?.username || 'member'} · {new Date(post.createdAt).toLocaleDateString()}</span></div></>; return <article className="post-card"><header className="post-header"><div className={showFollow ? "post-author-follow-group has-post-follow-control" : "post-author-follow-group"}>{authorIdentity}{showFollow && followAction ? <button type="button" className={"outline-button post-follow-button" + (followAction.action === "cancel" ? " requested" : "")} onClick={toggleAuthorFollow} disabled={followBusy} aria-label={followAction.action === "cancel" ? "Cancel follow request to " + (post.author.displayName || post.author.username) : "Follow " + (post.author.displayName || post.author.username)} aria-busy={followBusy}>{followBusy ? "Saving…" : followAction.label}</button> : null}</div>{mine ? <div className="post-tools"><button onClick={() => { setEditText(post.text); setEditing((value) => !value); }} aria-label="Edit post"><Pencil size={13} /></button><button className="post-delete-action" onClick={deletePost} aria-label="Delete post"><Trash2 size={14} /></button></div> : <button className="post-report" onClick={() => setReporting((value) => !value)} aria-label="Report post"><Flag size={13} /></button>}</header>{editing ? <form className="edit-post-form" onSubmit={saveEdit}><textarea value={editText} onChange={(event) => setEditText(event.target.value)} maxLength="2000" required /><div><button type="button" className="text-button" onClick={() => setEditing(false)}>Cancel</button><button className="outline-button" disabled={busy || !editText.trim()}>Save edit</button></div></form> : post.text && <p className="post-text">{post.text}</p>}{post.image?.url && <figure className="post-image-frame"><img src={mediaUrl(post.image.url)} crossOrigin={mediaCrossOrigin(post.image.url)} alt={`Image shared by ${post.author?.displayName || 'a Chatz member'}`} loading="lazy" /></figure>}{reporting && <form className="report-form" onSubmit={reportPost}><label>Report reason<select value={reportReason} onChange={(event) => setReportReason(event.target.value)}><option value="inappropriate">Inappropriate content</option><option value="spam">Spam</option><option value="harassment">Harassment</option><option value="other">Other</option></select></label><button className="outline-button">Submit report</button></form>}{reportNotice && <p className="success-message">{reportNotice}</p>}<div className="post-actions"><button type="button" className={`post-action post-action-like${post.likedByMe ? ' selected' : ''}`} aria-pressed={Boolean(post.likedByMe)} onClick={toggleLike} disabled={busy} aria-label={post.likedByMe ? 'Unlike post' : 'Like post'}><Heart size={16} fill={post.likedByMe ? 'currentColor' : 'none'} />{post.likeCount || 0}</button><button className={`post-action post-action-comment${commentsOpen ? ' selected' : ''}`} aria-pressed={commentsOpen} onClick={() => setCommentsOpen((open) => !open)} aria-expanded={commentsOpen} aria-label={`${commentsOpen ? 'Hide' : 'Show'} ${post.comments?.length || 0} comments`}><MessageCircle size={16} />{post.comments?.length || 0}</button>{showOpenLink && <NavLink className="post-open-link" to={`/p/${post._id}`}>Open post</NavLink>}<button className={`post-action post-action-save save-action${post.isSaved ? ' selected' : ''}`} aria-pressed={Boolean(post.isSaved)} onClick={toggleSave} disabled={busy} aria-label={post.isSaved ? 'Remove saved post' : 'Save post'}><Bookmark size={16} fill={post.isSaved ? 'currentColor' : 'none'} /></button></div>{commentsOpen && <><div className="comment-list">{post.comments?.slice(-3).map((item) => <div className="comment" key={item._id}><Avatar className="comment-avatar" src={item.author?.avatarUrl} name={item.author?.displayName || 'Member'} userId={item.author?._id} size={30} /><div className="comment-copy"><strong>{item.author?.displayName || 'Member'}</strong><span>{item.text}</span></div></div>)}{!post.comments?.length && <p className="comments-empty">No comments yet. Start the conversation.</p>}</div><form className="comment-form" onSubmit={addComment}><input value={comment} onChange={(event) => setComment(event.target.value)} maxLength="1000" placeholder="Add a thoughtful comment…" aria-label="Add a comment" /><button disabled={busy || !comment.trim()} aria-label="Send comment"><Send size={15} /></button></form></>}{error && <p className="inline-error" role="alert">{error}</p>}</article>;
 }
 
 export function PostDetail({ postId }) {
@@ -70,7 +106,7 @@ export function PostDetail({ postId }) {
   useEffect(() => { load(); }, [postId]);
   if (loading) return <div className="feed-loading">Opening post…</div>;
   if (error || !post) return <div className="social-empty"><h3>Post unavailable.</h3><p>{error || 'This post could not be found.'}</p></div>;
-  return <section className="post-detail"><PostCard post={post} onChange={load} /></section>;
+  return <section className="post-detail"><PostCard post={post} onChange={load} onLikeChange={(_, likeState) => setPost((current) => current ? { ...current, ...likeState } : current)} /></section>;
 }
 
 export default function SocialPage({ mode = 'following', username: givenUsername }) {
@@ -78,25 +114,47 @@ export default function SocialPage({ mode = 'following', username: givenUsername
   const routeParams = useParams();
   const username = givenUsername || routeParams.username;
   const [posts, setPosts] = useState([]);
+  const [nextCursor, setNextCursor] = useState(null);
   const [text, setText] = useState('');
   const [visibility, setVisibility] = useState('public');
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
   const imageInputRef = useRef(null);
-  async function load() {
-    setLoading(true); setError('');
+  async function load({ append = false } = {}) {
+    if (append && (!nextCursor || loadingMore)) return;
+    append ? setLoadingMore(true) : setLoading(true);
+    setError('');
     try {
       const endpoint = mode === 'saved' ? '/api/saved' : mode === 'profile' ? `/api/users/${username}/posts` : `/api/posts?feed=${mode}`;
-      const { data } = await api.get(endpoint);
-      setPosts(data.posts);
+      const url = mode === 'following' && append ? `${endpoint}&cursor=${encodeURIComponent(nextCursor)}` : endpoint;
+      const { data } = await api.get(url);
+      if (mode === 'following') setNextCursor(data.nextCursor || null);
+      setPosts((current) => {
+        if (!append) return data.posts;
+        const seen = new Set(current.map((post) => post._id));
+        return [...current, ...data.posts.filter((post) => !seen.has(post._id))];
+      });
     } catch (requestError) { setError(getApiError(requestError)); }
-    finally { setLoading(false); }
+    finally { setLoading(false); setLoadingMore(false); }
+  }
+  function updatePostLike(postId, likeState) {
+    setPosts((current) => applyPostLikeState(current, postId, likeState));
   }
   useEffect(() => { load(); }, [mode, username]);
+  useEffect(() => {
+    if (mode !== 'following') return undefined;
+    return subscribeToFollowRelationshipChanges(({ detail = {} }) => {
+    if (!detail.username) return;
+    setPosts((current) => current.map((post) => post.author?.username === detail.username
+      ? { ...post, author: { ...post.author, isFollowing: Boolean(detail.following), hasPendingFollowRequest: Boolean(detail.requestPending) } }
+      : post));
+    });
+  }, [mode]);
   useEffect(() => {
     if (!imageFile) { setImagePreview(''); return undefined; }
     const previewUrl = URL.createObjectURL(imageFile);
@@ -112,9 +170,13 @@ export default function SocialPage({ mode = 'following', username: givenUsername
         form.append('text', text.trim());
         form.append('visibility', visibility);
         form.append('image', imageFile);
-        await api.post('/api/posts', form);
-      } else await api.post('/api/posts', { text: text.trim(), visibility });
-      setText(''); setImageFile(null); setSuccess('Your post is live.'); await load();
+        const { data } = await api.post('/api/posts', form);
+        setPosts((current) => [data.post, ...current.filter((post) => post._id !== data.post._id)]);
+      } else {
+        const { data } = await api.post('/api/posts', { text: text.trim(), visibility });
+        setPosts((current) => [data.post, ...current.filter((post) => post._id !== data.post._id)]);
+      }
+      setText(''); setImageFile(null); setSuccess('Your post is live.');
     }
     catch (requestError) { setError(getApiError(requestError)); }
     finally { setBusy(false); }
@@ -142,10 +204,11 @@ export default function SocialPage({ mode = 'following', username: givenUsername
     {isHome && <section className="home-composer-section" aria-label="Create a post"><h2 className="sr-only">Create a post</h2>{homeComposer}{feedback}</section>}
     {!isHome && feedback}
     <section className="social-feed-section" aria-labelledby={`social-feed-title-${mode}`}>
-      <div className={`social-page-heading${isHome ? ' feed-toolbar' : ''}`} aria-label={isHome ? 'Feed controls' : undefined}><div>{mode !== 'following' && mode !== 'explore' && <span className="section-kicker">{kicker}</span>}<h2 id={`social-feed-title-${mode}`}>{title}</h2></div><button className="refresh-button" onClick={load} disabled={loading}>Refresh</button></div>
-      <div className="feed-posts" aria-busy={loading} aria-label={`${title} posts`}>
-        {loading ? <div className="feed-loading" role="status">Loading posts...</div> : posts.length ? <div className="post-list">{posts.map((post) => <PostCard key={post._id} post={post} onChange={load} showOpenLink={mode === 'profile'} />)}</div> : <div className="social-empty"><div className="empty-icon"><MessageCircle size={19} /></div><h3>{mode === 'following' ? 'Your feed starts with a hello.' : mode === 'saved' ? 'Nothing saved yet.' : 'A fresh start.'}</h3><p>{mode === 'following' ? 'Follow people to see their posts here, or share your own thought.' : mode === 'saved' ? 'Save a post with its bookmark control to keep it here for later.' : mode === 'explore' ? 'Public posts will appear here when the community shares them.' : 'No posts are available here yet.'}</p>{mode === 'following' && <NavLink className="primary-button" to="/explore">Find people to follow <span>→</span></NavLink>}{mode === 'saved' && <NavLink className="saved-empty-link" to="/explore">Explore public posts <span>→</span></NavLink>}</div>}
+      <div className={`social-page-heading${isHome ? ' feed-toolbar' : ''}`} aria-label={isHome ? 'Feed controls' : undefined}><div>{mode !== 'following' && mode !== 'explore' && <span className="section-kicker">{kicker}</span>}<h2 id={`social-feed-title-${mode}`}>{title}</h2></div><button className="refresh-button" onClick={() => load()} disabled={loading || loadingMore}>Refresh</button></div>
+      <div className="feed-posts" aria-busy={loading || loadingMore} aria-label={`${title} posts`}>
+        {loading ? <div className="feed-loading" role="status">Loading posts...</div> : posts.length ? <div className="post-list">{posts.map((post) => <PostCard key={post._id} post={post} onChange={load} onLikeChange={updatePostLike} showOpenLink={mode === 'profile'} linkAuthor={shouldLinkPostAuthor(mode)} showFollow={mode === 'following'} />)}</div> : <div className="social-empty"><div className="empty-icon"><MessageCircle size={19} /></div><h3>{mode === 'following' ? 'Your feed starts with a hello.' : mode === 'saved' ? 'Nothing saved yet.' : 'A fresh start.'}</h3><p>{mode === 'following' ? 'Follow people to see their posts here, or share your own thought.' : mode === 'saved' ? 'Save a post with its bookmark control to keep it here for later.' : mode === 'explore' ? 'Public posts will appear here when the community shares them.' : 'No posts are available here yet.'}</p>{mode === 'following' && <NavLink className="primary-button" to="/explore">Find people to follow <span>→</span></NavLink>}{mode === 'saved' && <NavLink className="saved-empty-link" to="/explore">Explore public posts <span>→</span></NavLink>}</div>}
       </div>
+      {isHome && !loading && nextCursor && <button type="button" className="text-button feed-load-more" onClick={() => load({ append: true })} disabled={loadingMore}>{loadingMore ? 'Loading more posts…' : 'Load more posts'} <span aria-hidden="true">→</span></button>}
     </section>
   </section>;
 }

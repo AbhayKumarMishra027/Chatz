@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { Notification } from '../models/Notification.js';
+import { Block } from '../models/Block.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requireClientOrigin } from '../middleware/requireClientOrigin.js';
 import { emitToUser } from '../realtime/socketServer.js';
@@ -11,8 +12,11 @@ notificationRoutes.use(requireAuth);
 notificationRoutes.get('/', async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 30, 1), 50);
-    const notifications = await Notification.find({ recipient: req.user._id }).sort({ createdAt: -1 }).limit(limit).populate('actor', 'username displayName avatarUrl').lean();
-    const unreadCount = await Notification.countDocuments({ recipient: req.user._id, readAt: null });
+    const blockedRows = await Block.find({ $or: [{ blocker: req.user._id }, { blocked: req.user._id }] }).select('blocker blocked').lean();
+    const blockedIds = blockedRows.map((row) => row.blocker.toString() === req.user.id ? row.blocked : row.blocker);
+    const filter = { recipient: req.user._id, actor: { $nin: blockedIds } };
+    const notifications = await Notification.find(filter).sort({ createdAt: -1 }).limit(limit).populate('actor', 'username displayName avatarUrl').lean();
+    const unreadCount = await Notification.countDocuments({ ...filter, readAt: null });
     res.json({ notifications, unreadCount });
   } catch (error) { next(error); }
 });

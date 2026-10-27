@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hydrateCurrentUser, mergeCurrentUser, resolveAvatarUrl } from '../src/features/auth/userState.js';
+import { hydrateCurrentUser, isCurrentUser, mergeCurrentUser, resolveAvatarUrl } from '../src/features/auth/userState.js';
 import { createCroppedAvatarFile } from '../src/utils/cropImage.js';
 
 test('current-user avatar updates merge immediately and cannot replace a different signed-in account', () => {
@@ -17,6 +17,14 @@ test('already-loaded records use the canonical current-user avatar revision with
   assert.equal(resolveAvatarUrl(current, 'user-1', stalePostAuthorUrl), current.avatarUrl);
   assert.equal(resolveAvatarUrl(current, 'user-2', '/api/media/avatars/user-2/image?v=1'), '/api/media/avatars/user-2/image?v=1');
   assert.equal(resolveAvatarUrl(current, undefined, stalePostAuthorUrl), stalePostAuthorUrl);
+});
+
+test('current-user relationship checks use stable IDs rather than usernames', () => {
+  const currentUser = { _id: 'user-1', username: 'testCase' };
+  assert.equal(isCurrentUser(currentUser, 'user-1'), true);
+  assert.equal(isCurrentUser(currentUser, 'user-2'), false);
+  assert.equal(isCurrentUser(currentUser, null), false);
+  assert.equal(isCurrentUser(null, 'user-1'), false);
 });
 
 test('late auth hydration and refresh data cannot overwrite a newer uploaded avatar after route changes', () => {

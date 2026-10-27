@@ -1,17 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, Bookmark, Compass, Home, ImagePlus, LogOut, MessageCircle, Moon, Search, Settings, Sun, Users, X } from 'lucide-react';
+import { Bell, Bookmark, Compass, Home, LogOut, MessageCircle, Moon, Search, Settings, Sun, Users, X } from 'lucide-react';
 import { io } from 'socket.io-client';
 import Cropper from 'react-easy-crop';
 import AuthPage from './pages/AuthPage.jsx';
+import ExplorePage from './pages/ExplorePage.jsx';
 import SocialPage, { PostDetail } from './pages/SocialPage.jsx';
 import MessagesPage from './pages/MessagesPage.jsx';
 import NotificationsPage from './pages/NotificationsPage.jsx';
 import { useAuth } from './features/auth/AuthContext.jsx';
+import { isCurrentUser } from './features/auth/userState.js';
 import { api, getApiError } from './services/api.js';
 import { imageSelectionError, PROFILE_IMAGE_MAX_BYTES } from './utils/imageValidation.js';
 import { createCroppedAvatarFile } from './utils/cropImage.js';
 import Avatar from './components/Avatar.jsx';
+import Brand from './components/Brand.jsx';
+import { publishFollowRelationshipChange, subscribeToFollowRelationshipChanges } from './features/users/followSync.js';
 
 const navItems = [
   ['/', 'Home', Home], ['/explore', 'Explore', Compass], ['/messages', 'Messages', MessageCircle],
@@ -26,10 +30,6 @@ const navColorClass = {
   '/profile': 'nav-profile',
   '/settings': 'nav-settings',
 };
-
-function Brand() {
-  return <NavLink className="brand" to="/" aria-label="Chatz home"><span className="brand-mark"><MessageCircle size={18} fill="currentColor" /></span><span>chatz<span className="brand-period">.</span></span></NavLink>;
-}
 
 function Sidebar() {
   const { user, logout } = useAuth();
@@ -74,17 +74,29 @@ function Topbar({ title }) {
     return () => { alive = false; clearTimeout(timer); };
   }, [query]);
   function goTo(path) { setSearchOpen(false); setQuery(''); navigate(path); }
-  return <header className="topbar"><div className="mobile-brand"><Brand /></div><div className="breadcrumbs">Chatz <span>/</span> <strong>{title}</strong></div><div className="topbar-actions"><form className={`search-control${searchOpen ? ' open' : ''}`} role="search" onClick={() => { if (!searchOpen) setSearchOpen(true); }} onSubmit={(event) => { event.preventDefault(); setSearchOpen(true); }}><button type="button" className="search-expand" onClick={() => setSearchOpen(true)} aria-label="Open search"><Search size={16} /></button><input value={query} onKeyDown={(event) => { if (event.key === 'Escape') setSearchOpen(false); }} onFocus={() => setSearchOpen(true)} onChange={(event) => { setQuery(event.target.value); setResults({ users: [], posts: [] }); setSearchOpen(true); }} placeholder="Search people and posts" aria-label="Search people and posts" /><kbd>⌘ K</kbd>{searchOpen && <button type="button" className="search-close" onClick={() => setSearchOpen(false)} aria-label="Close search"><X size={15} /></button>}{searchOpen && (query.trim().length > 0) && <div className="search-results" role="region" aria-label="Search results">{searchLoading ? <div className="search-state">Searching Chatz…</div> : searchError ? <div className="search-state search-error">{searchError}</div> : query.trim().length < 2 ? <div className="search-state">Type at least 2 characters.</div> : !results.users.length && !results.posts.length ? <div className="search-state">No people or posts found.</div> : <><div className="search-group-label">PEOPLE</div>{results.users.length ? results.users.map((person) => <button type="button" className="search-result" key={person._id} onClick={() => goTo(`/u/${person.username}`)}><Avatar className="search-avatar" src={person.avatarUrl} name={person.displayName} userId={person._id} size={34} /><span><strong>{person.displayName}</strong><small>@{person.username}{person.isPrivate ? ' · Private' : ''}</small></span></button>) : <div className="search-state compact">No matching people.</div>}<div className="search-group-label">POSTS</div>{results.posts.length ? results.posts.map((post) => <button type="button" className="search-result search-post-result" key={post._id} onClick={() => goTo(`/p/${post._id}`)}><span><strong>{post.author.displayName}</strong><small>{post.text}</small></span></button>) : <div className="search-state compact">No matching posts.</div>}</>}</div>}</form><ThemeButton theme={document.documentElement.dataset.theme || 'light'} onToggle={() => window.dispatchEvent(new Event('toggle-theme'))} /><NavLink to="/profile" className="avatar-link" title={user.displayName} aria-label={`Open ${user.displayName}'s profile`}><Avatar className="avatar-top" src={user.avatarUrl} name={user.displayName} userId={user._id} size={31} loading="eager" /></NavLink></div></header>;
+  return <header className="topbar"><div className="topbar-context"><div className="mobile-brand"><Brand /></div><div className="breadcrumbs">Chatz <span>/</span> <strong>{title}</strong></div></div><div className="topbar-actions"><form className={`search-control${searchOpen ? ' open' : ''}`} role="search" onClick={() => { if (!searchOpen) setSearchOpen(true); }} onSubmit={(event) => { event.preventDefault(); setSearchOpen(true); }}><button type="button" className="search-expand" onClick={() => setSearchOpen(true)} aria-label="Open search"><Search size={16} /></button><input value={query} onKeyDown={(event) => { if (event.key === 'Escape') setSearchOpen(false); }} onFocus={() => setSearchOpen(true)} onChange={(event) => { setQuery(event.target.value); setResults({ users: [], posts: [] }); setSearchOpen(true); }} placeholder="Search people and posts" aria-label="Search people and posts" /><kbd>⌘ K</kbd>{searchOpen && <button type="button" className="search-close" onClick={() => setSearchOpen(false)} aria-label="Close search"><X size={15} /></button>}{searchOpen && (query.trim().length > 0) && <div className="search-results" role="region" aria-label="Search results">{searchLoading ? <div className="search-state">Searching Chatz…</div> : searchError ? <div className="search-state search-error">{searchError}</div> : query.trim().length < 2 ? <div className="search-state">Type at least 2 characters.</div> : !results.users.length && !results.posts.length ? <div className="search-state">No people or posts found.</div> : <><div className="search-group-label">PEOPLE</div>{results.users.length ? results.users.map((person) => <button type="button" className="search-result" key={person._id} onClick={() => goTo(`/u/${person.username}`)}><Avatar className="search-avatar" src={person.avatarUrl} name={person.displayName} userId={person._id} size={34} /><span><strong>{person.displayName}</strong><small>@{person.username}{person.isPrivate ? ' · Private' : ''}</small></span></button>) : <div className="search-state compact">No matching people.</div>}<div className="search-group-label">POSTS</div>{results.posts.length ? results.posts.map((post) => <button type="button" className="search-result search-post-result" key={post._id} onClick={() => goTo(`/p/${post._id}`)}><span><strong>{post.author.displayName}</strong><small>{post.text}</small></span></button>) : <div className="search-state compact">No matching posts.</div>}</>}</div>}</form><ThemeButton theme={document.documentElement.dataset.theme || 'light'} onToggle={() => window.dispatchEvent(new Event('toggle-theme'))} /><NavLink to="/profile" className="avatar-link" title={user.displayName} aria-label={`Open ${user.displayName}'s profile`}><Avatar className="avatar-top" src={user.avatarUrl} name={user.displayName} userId={user._id} size={31} loading="eager" /></NavLink></div></header>;
 }
 
-function HomeRightRail({ className = '' }) {
+function HomeRightRail({ className = '', showSuggestions = true }) {
   const [suggestions, setSuggestions] = useState([]);
   const [conversations, setConversations] = useState([]);
   const [selectedConversationId, setSelectedConversationId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const suggestionsRequestVersion = useRef(0);
   useEffect(() => {
     let alive = true;
+    async function refreshSuggestions() {
+      const requestVersion = ++suggestionsRequestVersion.current;
+      try {
+        const { data } = await api.get('/api/users/suggestions');
+        if (alive && requestVersion === suggestionsRequestVersion.current) setSuggestions(data.users);
+        return data.users;
+      } catch (requestError) {
+        if (alive && requestVersion === suggestionsRequestVersion.current) setError(getApiError(requestError));
+        throw requestError;
+      }
+    }
     async function refreshConversations() {
       try {
         const { data } = await api.get('/api/messages');
@@ -93,27 +105,38 @@ function HomeRightRail({ className = '' }) {
     }
     const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000', { withCredentials: true });
     socket.on('conversation:update', refreshConversations);
-    Promise.allSettled([api.get('/api/users/suggestions'), api.get('/api/messages')])
-      .then(([suggestionResult, conversationResult]) => {
+    if (showSuggestions) socket.on('account:blocks:update', () => { refreshSuggestions().catch(() => {}); });
+    socket.on('conversation:unavailable', ({ conversationId }) => {
+      refreshConversations();
+      setSelectedConversationId((current) => current === conversationId ? null : current);
+    });
+    const handleFollowChange = ({ detail }) => {
+      setError('');
+      if (detail?.following || detail?.requestPending) {
+        setSuggestions((current) => current.filter((person) => person.username !== detail.username));
+      }
+      refreshSuggestions().catch(() => {});
+    };
+    const unsubscribeFollowChanges = showSuggestions ? subscribeToFollowRelationshipChanges(handleFollowChange) : () => {};
+    Promise.allSettled([showSuggestions ? refreshSuggestions() : Promise.resolve(null), api.get('/api/messages')])
+      .then(([, conversationResult]) => {
         if (!alive) return;
-        if (suggestionResult.status === 'fulfilled') setSuggestions(suggestionResult.value.data.users);
-        else setError(getApiError(suggestionResult.reason));
         if (conversationResult.status === 'fulfilled') setConversations(conversationResult.value.data.conversations);
         else setError(getApiError(conversationResult.reason));
       })
       .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; socket.disconnect(); };
-  }, []);
+    return () => { alive = false; suggestionsRequestVersion.current += 1; unsubscribeFollowChanges(); socket.disconnect(); };
+  }, [showSuggestions]);
   async function toggleFollow(person) {
     setError('');
     try {
-      const { data } = await api.request({ method: person.isFollowing ? 'delete' : 'post', url: `/api/users/${person.username}/follow` });
-      setSuggestions((current) => current.map((item) => item._id === person._id ? { ...item, isFollowing: Boolean(data.following) } : item));
+      const { data } = await api.request({ method: person.isFollowing || person.hasPendingFollowRequest ? 'delete' : 'post', url: `/api/users/${person.username}/follow` });
+      publishFollowRelationshipChange({ username: person.username, following: Boolean(data.following), requestPending: Boolean(data.requestPending) });
     } catch (requestError) { setError(getApiError(requestError)); }
   }
   return <aside className={['right-rail', 'home-right-rail', className].filter(Boolean).join(' ')}>
-    <section className="rail-card home-widget"><div className="rail-card-header"><div><span className="section-kicker">MEET THE COMMUNITY</span><h3>People to follow</h3></div><Users size={18} strokeWidth={1.7} /></div>{loading ? <div className="home-widget-state">Finding people…</div> : suggestions.length ? <div className="suggestion-list">{suggestions.map((person) => <div className="suggestion-row" key={person._id}><NavLink className="avatar-profile-link" to={`/u/${person.username}`} aria-label={`Open ${person.displayName} profile`}><Avatar className="avatar-you" src={person.avatarUrl} name={person.displayName} userId={person._id} size={34} /></NavLink><NavLink className="suggestion-identity" to={`/u/${person.username}`}><strong>{person.displayName}</strong><span>@{person.username}{person.headline ? ` · ${person.headline}` : ''}</span></NavLink><button className={`suggestion-follow${person.isFollowing ? ' following' : ''}`} onClick={() => toggleFollow(person)} aria-label={`${person.isFollowing ? 'Unfollow' : 'Follow'} ${person.displayName}`}>{person.isFollowing ? 'Following' : 'Follow'}</button></div>)}</div> : <div className="home-widget-state">No people to suggest yet. Check back as the community grows.</div>}{error && <p className="inline-error" role="alert">{error}</p>}<NavLink className="rail-link" to="/explore">Explore people <span>→</span></NavLink></section>
-    <section className="rail-card home-widget"><div className="rail-card-header"><div><span className="section-kicker">PICK UP WHERE YOU LEFT OFF</span><h3>Recent conversations</h3></div><MessageCircle size={18} strokeWidth={1.7} /></div>{loading ? <div className="home-widget-state">Loading conversations…</div> : conversations.length ? <div className="recent-conversations">{conversations.slice(0, 5).map((conversation) => <button className="recent-conversation" key={conversation._id} onClick={() => setSelectedConversationId(conversation._id)}><Avatar className="conversation-avatar" src={conversation.participant.avatarUrl} name={conversation.participant.displayName} userId={conversation.participant._id} size={36} /><span className="recent-conversation-copy"><strong>{conversation.participant.displayName}</strong><span>{conversation.lastMessage || 'Start a conversation'}</span></span>{conversation.unreadCount > 0 && <i className="recent-unread" aria-label={`${conversation.unreadCount} unread messages`}>{conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}</i>}</button>)}</div> : <div className="home-widget-state">No conversations yet. Find someone to say hello to.</div>}</section>
+    {showSuggestions && <section className="rail-card home-widget people-suggestions-widget"><div className="rail-card-header"><div><span className="section-kicker">MEET THE COMMUNITY</span><h3>People to follow</h3></div><Users size={18} strokeWidth={1.7} /></div>{loading ? <div className="home-widget-state">Finding people…</div> : suggestions.length ? <div className="suggestion-list">{suggestions.map((person) => <div className="suggestion-row" key={person._id}><NavLink className="avatar-profile-link" to={`/u/${person.username}`} aria-label={`Open ${person.displayName} profile`}><Avatar className="avatar-you" src={person.avatarUrl} name={person.displayName} userId={person._id} size={34} /></NavLink><NavLink className="suggestion-identity" to={`/u/${person.username}`}><strong>{person.displayName}</strong><span>@{person.username}{person.isPrivate ? ' · Private' : person.headline ? ` · ${person.headline}` : ''}</span></NavLink><button className={`suggestion-follow${person.isFollowing ? ' following' : ''}${person.hasPendingFollowRequest ? ' requested' : ''}`} onClick={() => toggleFollow(person)} aria-label={`${person.hasPendingFollowRequest ? 'Cancel follow request to' : person.isFollowing ? 'Unfollow' : 'Follow'} ${person.displayName}`}>{person.isFollowing ? 'Following' : person.hasPendingFollowRequest ? 'Requested' : 'Follow'}</button></div>)}</div> : <div className="home-widget-state">No people to suggest yet. Check back as the community grows.</div>}{error && <p className="inline-error" role="alert">{error}</p>}<NavLink className="rail-link" to="/explore">Explore people <span>→</span></NavLink></section>}
+    <section className="rail-card home-widget recent-conversations-widget"><div className="rail-card-header"><div><span className="section-kicker">PICK UP WHERE YOU LEFT OFF</span><h3>Recent conversations</h3></div><MessageCircle size={18} strokeWidth={1.7} /></div>{loading ? <div className="home-widget-state">Loading conversations…</div> : conversations.length ? <div className="recent-conversations">{conversations.slice(0, 3).map((conversation) => <button className="recent-conversation" key={conversation._id} onClick={() => setSelectedConversationId(conversation._id)}><Avatar className="conversation-avatar" src={conversation.participant.avatarUrl} name={conversation.participant.displayName} userId={conversation.participant._id} size={36} /><span className="recent-conversation-copy"><strong>{conversation.participant.displayName}</strong><span>{conversation.lastMessage || 'Start a conversation'}</span></span>{conversation.unreadCount > 0 && <i className="recent-unread" aria-label={`${conversation.unreadCount} unread messages`}>{conversation.unreadCount > 9 ? '9+' : conversation.unreadCount}</i>}</button>)}</div> : <div className="home-widget-state">No conversations yet. Find someone to say hello to.</div>}<NavLink className="rail-link" to="/messages">View all conversations <span aria-hidden="true">→</span></NavLink></section>
     {selectedConversationId && <section className="rail-card quick-chat-card" aria-label="Quick chat"><MessagesPage key={selectedConversationId} initialConversationId={selectedConversationId} quickChat onQuickChatClose={() => setSelectedConversationId(null)} onConversationsChange={setConversations} /></section>}
   </aside>;
 }
@@ -122,78 +145,15 @@ function PageHeading({ eyebrow, title, subtitle, icon: Icon, className = '' }) {
   return <section className={`page-heading${className ? ` ${className}` : ''}`}><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{subtitle}</p></div><div className="heading-illustration"><div className="illustration-ring ring-one" /><div className="illustration-ring ring-two" /><Icon size={26} strokeWidth={1.4} /></div></section>;
 }
 
-function ExplorePeopleSearch() {
-  const navigate = useNavigate();
-  const [query, setQuery] = useState('');
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [following, setFollowing] = useState({});
-  const [contact, setContact] = useState(null);
-  const [firstMessage, setFirstMessage] = useState('');
-  const [notice, setNotice] = useState('');
-  const [reportTarget, setReportTarget] = useState(null);
-  const [reportReason, setReportReason] = useState('other');
-  useEffect(() => {
-    const term = query.trim();
-    if (term.length < 2) { setUsers([]); setLoading(false); setError(''); return undefined; }
-    setUsers([]); setLoading(false); setError('');
-    let alive = true;
-    const timer = setTimeout(async () => {
-      setLoading(true); setError(''); setUsers([]);
-      try { const { data } = await api.get(`/api/users/search?q=${encodeURIComponent(term)}`); if (alive) { setUsers(data.users); setFollowing(Object.fromEntries(data.users.map((person) => [person.username, person.isFollowing]))); } }
-      catch (requestError) { if (alive) setError(getApiError(requestError)); }
-      finally { if (alive) setLoading(false); }
-    }, 250);
-    return () => { alive = false; clearTimeout(timer); };
-  }, [query]);
-  async function toggleFollow(username) {
-    const isFollowing = following[username];
-    try {
-      await api.request({ method: isFollowing ? 'delete' : 'post', url: `/api/users/${username}/follow` });
-      setFollowing((state) => ({ ...state, [username]: !isFollowing }));
-    } catch (requestError) { setError(getApiError(requestError)); }
-  }
-  async function sendFirstMessage(event) {
-    event.preventDefault(); if (!contact || !firstMessage.trim()) return;
-    setError(''); setNotice('');
-    try { const { data } = await api.post(`/api/messages/${contact.username}`, { text: firstMessage.trim() }); setContact(null); setFirstMessage(''); setNotice(data.status === 'pending' ? 'Message request sent. You’ll see a reply in Messages.' : 'Message sent. Your conversation is ready.'); if (data.status === 'accepted') navigate('/messages'); }
-    catch (requestError) { setError(getApiError(requestError)); }
-  }
-  async function blockUser(person) {
-    if (!window.confirm(`Block @${person.username}? They won’t be able to contact you or view your profile.`)) return;
-    try { await api.post(`/api/users/${person.username}/block`); setUsers((current) => current.filter((item) => item._id !== person._id)); setNotice(`@${person.username} was blocked. You can unblock them in Settings.`); }
-    catch (requestError) { setError(getApiError(requestError)); }
-  }
-  async function reportUser(event) {
-    event.preventDefault(); if (!reportTarget) return;
-    try { await api.post(`/api/reports/user/${reportTarget.username}`, { reason: reportReason }); setNotice('Report submitted for review.'); setReportTarget(null); }
-    catch (requestError) { setError(getApiError(requestError)); }
-  }
-  const searchTerm = query.trim();
-  const hasPeopleActivity = searchTerm.length > 0 || Boolean(error || notice || contact || reportTarget);
-  return <div className="explore-page">
-    <section className="explore-discovery" aria-labelledby="explore-people-heading"><h2 id="explore-people-heading">People</h2><label className="explore-search" htmlFor="explore-people-search"><Search size={18} aria-hidden="true" /><input id="explore-people-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name or username" aria-label="Search people" /></label></section>
-    {hasPeopleActivity && <section className="explore-people-results" aria-label="People search results" aria-busy={loading}>
-      {error && <p className="inline-error" role="alert">{error}</p>}
-      {notice && <p className="success-message" role="status">{notice}</p>}
-      {searchTerm.length === 1 && <p className="explore-search-status">Enter at least 2 characters.</p>}
-      {loading && <div className="explore-search-status" role="status">Searching people…</div>}
-      {!loading && searchTerm.length >= 2 && !users.length && !error && <p className="explore-search-status">No people found.</p>}
-      {users.length > 0 && <div className="people-list">{users.map((person) => <article className="person-card" key={person._id}><Avatar className="avatar-you" src={person.avatarUrl} name={person.displayName} userId={person._id} size={40} /><div className="person-copy"><NavLink className="person-profile-link" to={`/u/${person.username}`}>{person.displayName}</NavLink><span>@{person.username}{person.headline ? ` · ${person.headline}` : ''}</span></div><div className="person-actions"><button className="outline-button" onClick={() => toggleFollow(person.username)}>{following[person.username] ? 'Following' : 'Follow'}</button><button className="outline-button" onClick={() => { setContact(person); setFirstMessage(''); }}>Message</button><button className="quiet-action" onClick={() => setReportTarget(person)}>Report</button><button className="quiet-action" onClick={() => blockUser(person)}>Block</button></div></article>)}</div>}
-      {contact && <form className="first-message-form" onSubmit={sendFirstMessage}><strong>Say hello to {contact.displayName}</strong><textarea value={firstMessage} onChange={(event) => setFirstMessage(event.target.value)} maxLength="4000" placeholder="Write a thoughtful first message…" required /><div><button type="button" className="text-button" onClick={() => setContact(null)}>Cancel</button><button className="primary-button" disabled={!firstMessage.trim()}>Send message <span>→</span></button></div></form>}
-      {reportTarget && <form className="report-form user-report-form" onSubmit={reportUser}><strong>Report {reportTarget.displayName}</strong><label>Reason<select value={reportReason} onChange={(event) => setReportReason(event.target.value)}><option value="spam">Spam</option><option value="harassment">Harassment</option><option value="inappropriate">Inappropriate behavior</option><option value="impersonation">Impersonation</option><option value="other">Other</option></select></label><div><button type="button" className="text-button" onClick={() => setReportTarget(null)}>Cancel</button><button className="outline-button">Submit report</button></div></form>}
-    </section>}
-  </div>;
-}
-
 function HomePageLayout({ title, subtitle, Icon }) {
   return <main className="main-content">
     <Topbar title={title} />
-    <PageHeading eyebrow="YOUR COMMUNITY" title="Home" subtitle={subtitle} icon={Icon} className="home-page-heading" />
     <div className="content-grid home-content-grid">
-      <section className="feed-column" aria-label="Your feed and post composer"><SocialPage mode="following" /></section>
-      <HomeRightRail />
+      <section className="feed-column home-main-column" aria-label="Your feed and post composer">
+        <PageHeading eyebrow="YOUR COMMUNITY" title="Home" subtitle={subtitle} icon={Icon} className="home-page-heading" />
+        <SocialPage mode="following" />
+      </section>
+      <HomeRightRail className="home-page-right-rail" />
     </div>
   </main>;
 }
@@ -201,18 +161,16 @@ function HomePageLayout({ title, subtitle, Icon }) {
 function ExplorePageLayout({ title, subtitle, Icon }) {
   return <main className="main-content">
     <Topbar title={title} />
-    <PageHeading eyebrow="DISCOVERY" title="Explore" subtitle={subtitle} icon={Icon} className="explore-page-heading" />
+    <PageHeading eyebrow="DISCOVERY" title="Explore" subtitle="Find accounts and public conversations." icon={Icon} className="explore-page-heading" />
     <div className="content-grid explore-content-grid">
-      <section className="feed-column explore-main-column" aria-label="Discover people and public posts">
-        <ExplorePeopleSearch />
-        <section className="explore-feed" aria-label="Public posts"><SocialPage mode="explore" /></section>
-      </section>
-      <HomeRightRail className="explore-right-rail" />
+      <section className="feed-column explore-main-column" aria-label="Explore people and public posts"><ExplorePage /></section>
+      <HomeRightRail className="explore-right-rail" showSuggestions={false} />
     </div>
   </main>;
 }
 
 function ProfileRelationshipModal({ username, kind, onClose }) {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [cursor, setCursor] = useState(null);
@@ -253,24 +211,27 @@ function ProfileRelationshipModal({ username, kind, onClose }) {
     <section className="profile-relationship-modal" role="dialog" aria-modal="true" aria-labelledby="profile-list-title" aria-busy={loading || loadingMore}>
       <header><div><span className="section-kicker">COMMUNITY</span><h2 id="profile-list-title">{kind === 'followers' ? 'Followers' : 'Following'}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close list"><X size={17} /></button></header>
       {actionError && <p className="inline-error" role="alert">{actionError}</p>}
-      {error ? <div className="profile-list-state"><p role="alert">{error}</p><button className="outline-button" onClick={() => load()}>Try again</button></div>
-        : loading ? <div className="profile-list-state" role="status">Loading {kind}…</div>
-          : users.length === 0 ? <div className="profile-list-state"><strong>No {kind} yet</strong><span>This list is empty for now.</span></div>
-            : <div className="profile-relationship-list">{users.map((person) => <article className="profile-relationship-row" key={person._id}>
+      {error && users.length === 0 ? <div className="profile-list-state"><p role="alert">{error}</p><button className="outline-button" onClick={() => load(cursor || null)}>Try again</button></div>
+        : loading && users.length === 0 ? <div className="profile-list-state" role="status">Loading {kind}…</div>
+          : users.length === 0 ? <div className="profile-list-state"><strong>No {kind} yet</strong><span>This list is empty for now.</span>{cursor && <button className="outline-button profile-list-more" disabled={loadingMore} onClick={() => load(cursor)}>{loadingMore ? 'Loading…' : error ? 'Retry loading more' : 'Load more'}</button>}</div>
+            : <div className="profile-relationship-list">
+              {error && <p className="inline-error" role="alert">{error}</p>}
+              {users.map((person) => <article className="profile-relationship-row" key={person._id}>
               <button className="profile-list-person" onClick={() => { onClose(); navigate(`/u/${person.username}`); }}>
                 <Avatar className="avatar-you" src={person.avatarUrl} name={person.displayName} userId={person._id} size={40} />
                 <span className="profile-list-identity"><strong>{person.displayName}</strong><small>@{person.username}</small></span>
               </button>
-              <button className={`outline-button profile-list-follow${person.isFollowing ? ' is-following' : ''}`} disabled={actionUser === person._id} onClick={() => toggleFollow(person)}>
+              {!isCurrentUser(user, person._id) && <button className={`outline-button profile-list-follow${person.isFollowing ? ' is-following' : ''}`} disabled={actionUser === person._id} onClick={() => toggleFollow(person)}>
                 {actionUser === person._id ? 'Saving…' : person.isFollowing ? 'Following' : person.hasPendingFollowRequest ? 'Requested' : 'Follow'}
-              </button>
-            </article>)}</div>}
-      {cursor && !error && <button className="outline-button profile-list-more" disabled={loadingMore} onClick={() => load(cursor)}>{loadingMore ? 'Loading…' : 'Load more'}</button>}
+              </button>}
+            </article>)}
+              {cursor && <button className="outline-button profile-list-more" disabled={loadingMore} onClick={() => load(cursor)}>{loadingMore ? 'Loading…' : error ? 'Retry loading more' : 'Load more'}</button>}
+            </div>}
     </section>
   </div>;
 }
 
-function ProfileHero({ profile, isSelf = false, onEdit, onFollow, onMessage, busy = false }) {
+function ProfileHero({ profile, isSelf = false, onEdit, onFollow, onMessage, onBlock, busy = false }) {
   const [listKind, setListKind] = useState('');
   return <section className="profile-hero">
     <Avatar className="profile-hero-avatar profile-large" src={profile.avatarUrl} name={profile.displayName} userId={profile._id} size="clamp(88px,11vw,116px)" />
@@ -279,9 +240,10 @@ function ProfileHero({ profile, isSelf = false, onEdit, onFollow, onMessage, bus
         <div className="profile-identity"><h2>{profile.displayName}</h2><span>@{profile.username}</span></div>
         <div className="profile-actions" aria-label={isSelf ? 'Profile actions' : 'Relationship actions'}>
           {isSelf && onEdit && <button className="primary-button profile-edit-button" onClick={onEdit}>Edit Profile</button>}
-          {!isSelf && <>
+          {!isSelf && profile.isBlockedByMe ? <button type="button" className="outline-button profile-block-button is-unblock" onClick={onBlock} disabled={busy}>{busy ? 'Updating…' : 'Unblock'}</button> : !isSelf && <>
             <button className={`outline-button profile-follow-button${profile.isFollowing ? ' is-following' : profile.hasPendingFollowRequest ? ' is-requested' : ''}`} onClick={onFollow} disabled={busy}>{busy ? 'Updating…' : profile.isFollowing ? 'Unfollow' : profile.hasPendingFollowRequest ? 'Cancel request' : 'Follow'}</button>
-            <button className="primary-button profile-message-button" onClick={onMessage}>Message</button>
+            <button className={`primary-button profile-message-button${profile.isPrivate ? ' private-profile-message-button' : ''}`} onClick={onMessage}>Message</button>
+            <button type="button" className="outline-button profile-block-button" onClick={onBlock} disabled={busy}>Block</button>
           </>}
         </div>
       </div>
@@ -291,31 +253,24 @@ function ProfileHero({ profile, isSelf = false, onEdit, onFollow, onMessage, bus
         {profile.bio && <p className="profile-bio">{profile.bio}</p>}
         {profile.profileLink && <a className="profile-link" href={profile.profileLink} target="_blank" rel="noreferrer">{profile.profileLink}</a>}
         {profile.isPrivate && <span className="profile-privacy-label">Private profile</span>}
-      </> : <p className="profile-private-note">This profile is private. Follow to see profile details and posts.</p>}
+      </> : <p className="profile-private-note">{profile.isBlockedByMe ? 'You blocked this account. Unblock it to view the profile again.' : 'This profile is private. Follow to see profile details and posts.'}</p>}
     </div>
     {listKind && <ProfileRelationshipModal username={profile.username} kind={listKind} onClose={() => setListKind('')} />}
   </section>;
 }
 
-function ProfileEditModal({ profile, onClose, onSaved }) {
+function ProfileEditModal({ profile, onClose, onSaved, onAvatarSaved }) {
   const [form, setForm] = useState({ displayName: profile.displayName, bio: profile.bio || '', headline: profile.headline || '', profileLink: profile.profileLink || '', isPrivate: Boolean(profile.isPrivate), messagePreference: profile.messagePreference || 'followers' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [avatarFile, setAvatarFile] = useState(null);
-  const [avatarPreview, setAvatarPreview] = useState('');
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarNotice, setAvatarNotice] = useState('');
   const [cropSource, setCropSource] = useState('');
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [croppedArea, setCroppedArea] = useState(null);
   const [cropBusy, setCropBusy] = useState(false);
   useEffect(() => () => { if (cropSource) URL.revokeObjectURL(cropSource); }, [cropSource]);
-  useEffect(() => {
-    if (!avatarFile) { setAvatarPreview(''); return undefined; }
-    const previewUrl = URL.createObjectURL(avatarFile);
-    setAvatarPreview(previewUrl);
-    return () => URL.revokeObjectURL(previewUrl);
-  }, [avatarFile]);
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key !== 'Escape' || busy || avatarBusy || cropBusy) return;
@@ -347,7 +302,6 @@ function ProfileEditModal({ profile, onClose, onSaved }) {
     event.target.value = '';
     if (!file) return;
     const validationError = imageSelectionError(file, PROFILE_IMAGE_MAX_BYTES);
-    setAvatarFile(null);
     if (validationError) { setCropSource(''); setError(validationError); return; }
     setError(''); setCrop({ x: 0, y: 0 }); setZoom(1); setCroppedArea(null); setCropSource(URL.createObjectURL(file));
   }
@@ -358,8 +312,8 @@ function ProfileEditModal({ profile, onClose, onSaved }) {
       const croppedFile = await createCroppedAvatarFile(cropSource, croppedArea);
       const validationError = imageSelectionError(croppedFile, PROFILE_IMAGE_MAX_BYTES);
       if (validationError) { setError(validationError); return; }
-      setAvatarFile(croppedFile);
-      setCropSource('');
+      const uploaded = await uploadAvatar(croppedFile);
+      if (uploaded) { setCropSource(''); setCroppedArea(null); setAvatarNotice('Profile photo updated.'); }
     } catch (cropError) {
       setError(cropError.message || 'Could not crop this photo. Please try another image.');
     } finally { setCropBusy(false); }
@@ -368,15 +322,16 @@ function ProfileEditModal({ profile, onClose, onSaved }) {
     if (cropBusy) return;
     setCropSource(''); setCroppedArea(null); setError('');
   }
-  async function uploadAvatar() {
-    if (!avatarFile) return;
+  async function uploadAvatar(file) {
+    if (!file || avatarBusy) return false;
     setAvatarBusy(true); setError('');
     try {
       const body = new FormData();
-      body.append('image', avatarFile);
+      body.append('image', file);
       const { data } = await api.post('/api/users/me/avatar', body);
-      await onSaved(data.user);
-    } catch (requestError) { setError(getApiError(requestError)); }
+      await onAvatarSaved(data.user);
+      return true;
+    } catch (requestError) { setError(getApiError(requestError)); return false; }
     finally { setAvatarBusy(false); }
   }
   return <div className="profile-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy && !avatarBusy && !cropBusy) onClose(); }}>
@@ -388,11 +343,11 @@ function ProfileEditModal({ profile, onClose, onSaved }) {
         <label className="avatar-crop-zoom">Zoom <input type="range" min="1" max="4" step="0.01" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} aria-label="Zoom profile photo" /></label>
         <label className="outline-button profile-photo-select avatar-crop-replace">Choose another image<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={selectAvatar} disabled={cropBusy} /></label>
         {error && <p className="inline-error" role="alert">{error}</p>}
-        <div className="profile-modal-actions"><button type="button" className="outline-button" onClick={cancelCrop} disabled={cropBusy}>Cancel</button><button type="button" className="primary-button" onClick={applyCrop} disabled={cropBusy || !croppedArea}>{cropBusy ? 'Preparing…' : 'Apply Crop'}</button></div>
+        <div className="profile-modal-actions"><button type="button" className="outline-button" onClick={cancelCrop} disabled={cropBusy || avatarBusy}>Cancel</button><button type="button" className="primary-button" onClick={applyCrop} disabled={cropBusy || avatarBusy || !croppedArea}>{cropBusy || avatarBusy ? 'Cropping & uploading…' : 'Apply Crop & Upload'}</button></div>
       </section> : <form className="profile-form" onSubmit={save} aria-busy={busy}>
         <section className="profile-avatar-editor" aria-label="Profile photo">
-          <Avatar className="profile-avatar-preview" src={avatarPreview || profile.avatarUrl} name={profile.displayName} size="clamp(64px,18vw,76px)" loading="eager" />
-          <div className="profile-avatar-controls"><strong>Profile photo</strong><p>JPG, PNG, WebP, or GIF up to 5 MB.</p><label className="outline-button profile-photo-select">{avatarFile ? 'Choose another' : 'Choose image'}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={selectAvatar} disabled={avatarBusy || busy} /></label>{avatarFile && <button type="button" className="primary-button" onClick={uploadAvatar} disabled={avatarBusy || busy}>{avatarBusy ? 'Uploading…' : <><ImagePlus size={15} /> Upload photo</>}</button>}</div>
+          <Avatar className="profile-avatar-preview" src={profile.avatarUrl} name={profile.displayName} size="clamp(64px,18vw,76px)" loading="eager" />
+          <div className="profile-avatar-controls"><strong>Profile photo</strong><p>JPG, PNG, WebP, or GIF up to 5 MB.</p><label className="outline-button profile-photo-select">Choose image<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={selectAvatar} disabled={avatarBusy || busy} /></label>{avatarNotice && <p className="success-message" role="status">{avatarNotice}</p>}</div>
         </section>
         <fieldset className="profile-form-group"><legend>Profile details</legend>
           <label>Display name<input name="displayName" value={form.displayName} onChange={update} maxLength="60" required /></label>
@@ -437,6 +392,10 @@ function ProfilePage() {
     setNotice('Your profile has been updated.');
     setEditing(false);
   }
+  async function saveAvatar(updatedUser) {
+    setProfile((current) => ({ ...current, ...updatedUser }));
+    updateCurrentUser(updatedUser);
+  }
   async function decideRequest(requestId, decision) {
     setRequestError('');
     try {
@@ -456,7 +415,7 @@ function ProfilePage() {
     </section>}
     {notice && <p className="success-message" role="status">{notice}</p>}
     <div className="profile-posts-section"><SocialPage mode="profile" username={profile.username} /></div>
-    {editing && <ProfileEditModal profile={profile} onClose={() => setEditing(false)} onSaved={saveProfile} />}
+    {editing && <ProfileEditModal profile={profile} onClose={() => setEditing(false)} onSaved={saveProfile} onAvatarSaved={saveAvatar} />}
   </div>;
 }
 function BlockedAccountsPanel() {
@@ -564,16 +523,38 @@ function PublicProfilePage({ username }) {
     } catch (requestError) { setError(getApiError(requestError)); }
     finally { setBusy(false); }
   }
+  async function toggleBlock() {
+    const currentlyBlocked = Boolean(profile.isBlockedByMe);
+    if (!currentlyBlocked && !window.confirm(`Block @${profile.username}? They will not be able to view your profile or contact you.`)) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      if (currentlyBlocked) {
+        await api.delete(`/api/users/${username}/block`);
+        setProfile((current) => ({ ...current, isBlockedByMe: false }));
+        const { data } = await api.get(`/api/users/${username}`);
+        setProfile(data.user);
+        setNotice(`@${username} has been unblocked.`);
+      } else {
+        await api.post(`/api/users/${username}/block`);
+        setProfile((current) => ({ ...current, isBlockedByMe: true, canViewDetails: false, isFollowing: false, hasPendingFollowRequest: false }));
+        setComposing(false);
+        setNotice(`@${username} was blocked. You can unblock them in Settings.`);
+      }
+    } catch (requestError) { setError(getApiError(requestError)); }
+    finally { setBusy(false); }
+  }
   if (loading) return <div className="feed-loading">Opening profile…</div>;
   if (error && !profile) return <div className="social-empty"><h3>Profile unavailable.</h3><p>{error}</p></div>;
   if (!profile) return <div className="social-empty"><h3>Profile unavailable.</h3><p>We could not load this profile.</p></div>;
   const isSelf = profile._id === currentUser._id;
-  return <div className="profile-page public-profile">
-    <ProfileHero profile={profile} isSelf={isSelf} onEdit={() => navigate('/profile')} onFollow={toggleFollow} onMessage={() => setComposing((value) => !value)} busy={busy} />
+  return <div className={`profile-page public-profile${profile.isPrivate ? ' private-profile-view' : ''}`}>
+    <ProfileHero profile={profile} isSelf={isSelf} onEdit={() => navigate('/profile')} onFollow={toggleFollow} onMessage={() => setComposing((value) => !value)} onBlock={toggleBlock} busy={busy} />
     {error && <p className="inline-error" role="alert">{error}</p>}
     {notice && <p className="success-message" role="status">{notice}</p>}
-    {!isSelf && composing && <form className="first-message-form" onSubmit={sendMessage}><strong>Say hello to @{username}</strong><textarea value={message} onChange={(event) => setMessage(event.target.value)} maxLength="4000" placeholder="Write a thoughtful message…" required /><div><button type="button" className="text-button" onClick={() => setComposing(false)}>Cancel</button><button className="primary-button" disabled={busy || !message.trim()}>Send message <span>→</span></button></div></form>}
-    {profile.canViewDetails && <SocialPage mode="profile" username={username} />}
+    {!isSelf && !profile.isBlockedByMe && composing && <form className="first-message-form" onSubmit={sendMessage}><strong>Say hello to @{username}</strong><textarea value={message} onChange={(event) => setMessage(event.target.value)} maxLength="4000" placeholder="Write a thoughtful message…" required /><div><button type="button" className="text-button" onClick={() => setComposing(false)}>Cancel</button><button className="primary-button" disabled={busy || !message.trim()}>Send message <span>→</span></button></div></form>}
+    {profile.canViewDetails && !profile.isBlockedByMe && <SocialPage mode="profile" username={username} />}
   </div>;
 }
 function ComingSoon({ title, text, icon: Icon }) {
@@ -586,7 +567,7 @@ function MainContent() {
   if (pathname.startsWith('/u/')) return <main className="main-content"><Topbar title="Profile" /><PageHeading eyebrow="YOUR PEOPLE" title="A Chatz profile" subtitle="Get to know someone from the community." icon={Users} /><div className="content-grid"><section className="feed-column"><PublicProfilePage username={pathname.split('/')[2]} /></section><aside className="right-rail"><div className="rail-card discover-card"><div className="rail-card-header"><div><span className="section-kicker">FIND YOUR PEOPLE</span><h3>Explore</h3></div><Compass size={19} /></div><NavLink className="rail-link" to="/explore">Back to Explore <span>→</span></NavLink></div></aside></div></main>;
   const pages = {
     '/': ['Home', 'Share ideas. Keep up with your community.', Home],
-    '/explore': ['Explore', 'Find people and public posts.', Compass],
+    '/explore': ['Explore', 'Find accounts and public conversations.', Compass],
     '/messages': ['Messages', 'Your conversations will be right here.', MessageCircle],
     '/notifications': ['Notifications', 'Stay close to the moments that matter.', Bell],
     '/saved': ['Saved posts', 'Keep useful conversations close at hand.', Bookmark],
@@ -607,7 +588,7 @@ function ProtectedShell() {
   const { user, loading } = useAuth();
   if (loading) return <div className="auth-loading">Opening your space…</div>;
   if (!user) return <Navigate to="/login" replace />;
-  return <div className="app-shell"><Sidebar /><Routes><Route path="*" element={<MainContent />} /></Routes><nav className="mobile-nav" aria-label="Mobile navigation">{navItems.slice(0, 5).map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `mobile-nav-link ${navColorClass[to]}${isActive ? ' active' : ''}`}><Icon size={19} /><span>{label}</span></NavLink>)}</nav></div>;
+  return <div className="app-shell"><Sidebar /><Routes><Route path="*" element={<MainContent />} /></Routes><nav className="mobile-nav" aria-label="Mobile navigation">{navItems.map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `mobile-nav-link ${navColorClass[to]}${isActive ? ' active' : ''}`}><Icon size={19} /><span>{label}</span></NavLink>)}</nav></div>;
 }
 
 export default function App() {

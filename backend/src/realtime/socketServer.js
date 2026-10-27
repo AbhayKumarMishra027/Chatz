@@ -72,3 +72,11 @@ export function attachSocketServer(httpServer) {
 
 export function emitToUser(userId, event, payload) { io?.to(`user:${userId}`).emit(event, payload); }
 export function emitToConversation(conversationId, event, payload) { io?.to(`conversation:${conversationId}`).emit(event, payload); }
+export function revokeConversationAccess(conversationId, participantIds) {
+  if (!io) return;
+  const room = `conversation:${conversationId}`;
+  io.in(room).socketsLeave(room);
+  for (const userId of participantIds) {
+    io.to(`user:${userId}`).emit('conversation:unavailable', { conversationId: conversationId.toString() });
+  }
+}

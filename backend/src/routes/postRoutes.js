@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Follow } from '../models/Follow.js';
+import { FollowRequest } from '../models/FollowRequest.js';
 import { Post } from '../models/Post.js';
 import { SavedPost } from '../models/SavedPost.js';
 import { Block } from '../models/Block.js';
@@ -49,10 +50,93 @@ async function populatePost(query, viewerId) {
   return postForClient({ ...post.toObject(), likeCount: post.likes.length, likedByMe: post.likes.some((id) => id.toString() === viewerId.toString()), isSaved: Boolean(saved), likes: undefined });
 }
 
+async function feedPage(baseQuery, cursorId, limit, viewerId) {
+  const query = { ...baseQuery };
+  if (cursorId) {
+    const cursorPost = await Post.findById(cursorId).select('createdAt');
+    if (!cursorPost) return { posts: [], cursorId: null, hasMore: false };
+    query.$or = [
+      { createdAt: { $lt: cursorPost.createdAt } },
+      { createdAt: cursorPost.createdAt, _id: { $lt: cursorPost._id } },
+    ];
+  }
+
+  const scanLimit = limit * 4 + 1;
+  const batch = await Post.find(query).sort({ createdAt: -1, _id: -1 }).limit(scanLimit + 1)
+    .populate({ path: 'author', select: userProjection + ' isPrivate' })
+    .populate({ path: 'comments.author', select: userProjection }).lean();
+  const scanned = batch.slice(0, scanLimit);
+  const permitted = [];
+  for (const post of scanned) {
+    if (post.author && await canView(post, viewerId)) permitted.push(post);
+    if (permitted.length > limit) break;
+  }
+
+  if (permitted.length > limit) {
+    return { posts: permitted.slice(0, limit), cursorId: permitted[limit - 1]._id, hasMore: true };
+  }
+  if (batch.length > scanLimit) {
+    return { posts: permitted, cursorId: scanned.at(-1)?._id || null, hasMore: true };
+  }
+  return { posts: permitted, cursorId: null, hasMore: false };
+}
+
 postRoutes.get('/', async (req, res, next) => {
   try {
     const mode = req.query.feed === 'following' ? 'following' : 'explore';
     const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 20, 1), 30);
+    if (mode === 'following') {
+      let phase = 'following';
+      let cursorId = '';
+      const suppliedCursor = typeof req.query.cursor === 'string' ? req.query.cursor : '';
+      const legacyCursor = typeof req.query.before === 'string' ? req.query.before : '';
+      if (suppliedCursor) {
+        const match = /^(f|p)(?:\.([a-f\d]{24}))?$/i.exec(suppliedCursor);
+        if (!match || (match[1].toLowerCase() === 'f' && !match[2])) return res.status(400).json({ error: { message: 'Invalid feed cursor.' } });
+        phase = match[1].toLowerCase() === 'f' ? 'following' : 'public';
+        cursorId = match[2] || '';
+      } else if (legacyCursor) {
+        if (!mongoose.isValidObjectId(legacyCursor)) return res.status(400).json({ error: { message: 'Invalid pagination cursor.' } });
+        cursorId = legacyCursor;
+      }
+
+      const followed = [...new Set([req.user.id, ...(await followingIds(req.user.id)).map((id) => id.toString())])];
+      let posts = [];
+      let nextCursor = null;
+      if (phase === 'following') {
+        const preferred = await feedPage({ author: { $in: followed } }, cursorId, limit, req.user._id);
+        posts = preferred.posts;
+        if (preferred.hasMore) nextCursor = preferred.cursorId ? `f.${preferred.cursorId}` : null;
+        else if (posts.length >= limit) nextCursor = 'p';
+        else { phase = 'public'; cursorId = ''; }
+      }
+      if (phase === 'public' && posts.length < limit) {
+        const publicPage = await feedPage({ visibility: 'public', author: { $nin: followed } }, cursorId, limit - posts.length, req.user._id);
+        posts.push(...publicPage.posts);
+        nextCursor = publicPage.hasMore ? `p.${publicPage.cursorId}` : null;
+      }
+
+      const authorIds = [...new Set(posts.map((post) => post.author._id.toString()))];
+      const pendingRequests = authorIds.length
+        ? await FollowRequest.find({ follower: req.user._id, following: { $in: authorIds } }).select('following').lean()
+        : [];
+      const pendingIds = new Set(pendingRequests.map((row) => row.following.toString()));
+      const followedIds = new Set(followed);
+      const savedRows = posts.length ? await SavedPost.find({ user: req.user._id, post: { $in: posts.map((post) => post._id) } }).select('post').lean() : [];
+      const savedIds = new Set(savedRows.map((row) => row.post.toString()));
+      const result = posts.map((post) => {
+        const authorId = post.author._id.toString();
+        const author = { ...post.author,
+          isFollowing: authorId !== req.user.id && followedIds.has(authorId),
+          hasPendingFollowRequest: pendingIds.has(authorId),
+        };
+        return postForClient({ ...post, author, likeCount: post.likes.length,
+          likedByMe: post.likes.some((id) => id.toString() === req.user.id), isSaved: savedIds.has(post._id.toString()), likes: undefined });
+      });
+      res.json({ posts: result, nextCursor });
+      return;
+    }
+
     const query = {};
     if (req.query.before) {
       if (!mongoose.isValidObjectId(req.query.before)) return res.status(400).json({ error: { message: 'Invalid pagination cursor.' } });
@@ -60,10 +144,7 @@ postRoutes.get('/', async (req, res, next) => {
       if (!cursorPost) return res.json({ posts: [], nextCursor: null });
       query.$or = [{ createdAt: { $lt: cursorPost.createdAt } }, { createdAt: cursorPost.createdAt, _id: { $lt: cursorPost._id } }];
     }
-    if (mode === 'following') {
-      const ids = await followingIds(req.user.id);
-      query.author = { $in: [req.user._id, ...ids] };
-    } else query.visibility = 'public';
+    query.visibility = 'public';
 
     const batch = await Post.find(query).sort({ createdAt: -1, _id: -1 }).limit(limit * 4 + 1)
       .populate({ path: 'author', select: userProjection + ' isPrivate' }).populate({ path: 'comments.author', select: userProjection }).lean();

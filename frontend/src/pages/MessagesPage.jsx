@@ -43,8 +43,10 @@ export default function MessagesPage({ initialConversationId = null, quickChat =
   const loadInbox = useCallback(async () => {
     try {
       const [conversationResult, requestResult] = await Promise.all([api.get('/api/messages'), api.get('/api/messages/requests')]);
-      setConversations(conversationResult.data.conversations);
-      onConversationsChange(conversationResult.data.conversations);
+      const nextConversations = conversationResult.data.conversations;
+      setConversations(nextConversations);
+      setActive((current) => current ? nextConversations.find((item) => item._id === current._id) || current : current);
+      onConversationsChange(nextConversations);
       setRequests(requestResult.data.requests);
       setError('');
     } catch (requestError) { setError(getApiError(requestError)); }
@@ -68,6 +70,11 @@ export default function MessagesPage({ initialConversationId = null, quickChat =
     });
     socket.on('typing:update', ({ conversationId, userId, typing: activeTyping }) => { if (active?._id === conversationId && userId !== user._id) setTyping(activeTyping); });
     socket.on('conversation:update', () => loadInbox());
+    socket.on('conversation:unavailable', ({ conversationId }) => {
+      if (active?._id !== conversationId) { loadInbox(); return; }
+      setActive(null); setMessages([]); setMobileChat(false); setError('This conversation is no longer available.');
+      loadInbox();
+    });
     socket.on('message-request:new', () => loadInbox());
     socket.on('message-request:updated', () => loadInbox());
     socket.on('presence:update', ({ userId, online }) => setConversations((current) => current.map((item) => item.participant._id === userId ? { ...item, participant: { ...item.participant, online } } : item)));
@@ -118,15 +125,17 @@ export default function MessagesPage({ initialConversationId = null, quickChat =
         if (!alive) return;
         setMessages(data.messages);
         setNextCursor(data.nextCursor);
-        await api.post(`/api/messages/${active._id}/read`);
-        socketRef.current?.emit('conversation:join', { conversationId: active._id }, (result) => { if (result?.error) setError(result.error); });
+        if (active.status === 'accepted') {
+          await api.post(`/api/messages/${active._id}/read`);
+          socketRef.current?.emit('conversation:join', { conversationId: active._id }, (result) => { if (result?.error) setError(result.error); });
+        }
         loadInbox();
       } catch (requestError) { if (alive) setError(getApiError(requestError)); }
       finally { if (alive) setLoading(false); }
     }
     openConversation();
     return () => { alive = false; socketRef.current?.emit('typing:stop', { conversationId: active._id }); };
-  }, [active?._id, loadInbox]);
+  }, [active?._id, active?.status, loadInbox]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages]);
 
@@ -154,14 +163,14 @@ export default function MessagesPage({ initialConversationId = null, quickChat =
       await loadInbox();
       if (decision === 'accept') {
         const item = requests.find((request) => request.conversation._id === conversationId);
-        if (item) await openChat({ _id: conversationId, participant: item.sender, lastMessage: item.preview?.text || '' });
+        if (item) await openChat({ _id: conversationId, participant: item.sender, lastMessage: item.preview?.text || '', status: 'accepted' });
       }
     } catch (requestError) { setError(getApiError(requestError)); }
     finally { setBusy(false); }
   }
 
   async function sendMessage(event) {
-    event.preventDefault(); if (!draft.trim() || !active) return;
+    event.preventDefault(); if (!draft.trim() || !active || active.status === 'pending') return;
     const text = draft.trim(); setDraft(''); setError('');
     try {
       const { data } = await api.post(`/api/messages/${active._id}/messages`, { text });
@@ -228,7 +237,7 @@ export default function MessagesPage({ initialConversationId = null, quickChat =
         </div>;
       }) : <div className="chat-empty"><div className="empty-icon"><MessageCircle size={18} /></div><p>A good conversation starts with a hello.</p></div>}{typing && <div className="typing-status" role="status">Typing…</div>}<div ref={bottomRef} /></div>
       {error && <p className="inline-error chat-error" role="alert">{error}</p>}
-      <form className="message-composer" onSubmit={sendMessage}><input value={draft} onChange={(event) => draftChanged(event.target.value)} maxLength="4000" placeholder="Write a message…" aria-label="Write a message" /><button disabled={!draft.trim()} aria-label="Send message"><Send size={17} /></button></form>
+      <form className="message-composer" onSubmit={sendMessage}><input value={draft} onChange={(event) => draftChanged(event.target.value)} maxLength="4000" placeholder={active.status === 'pending' ? 'Waiting for their response…' : 'Write a message…'} aria-label="Write a message" disabled={active.status === 'pending'} /><button disabled={!draft.trim() || active.status === 'pending'} aria-label="Send message"><Send size={17} /></button></form>
     </> : <div className="chat-welcome">{quickChat && <button type="button" className="quick-chat-close" onClick={onQuickChatClose} aria-label="Close quick chat"><X size={17} /></button>}<div className="chat-welcome-orbit"><MessageCircle size={27} /></div><h3>Your conversations, in good company.</h3><p>Choose a conversation or find someone new to say hello to.</p></div>}</div>
   </section>
   {messageMenu && selectedMenuMessage && createPortal(<div className={`message-context-menu${messageMenu.openAbove ? ' opens-above' : ''}`} role="menu" aria-label="Message actions" ref={messageMenuRef} style={{ top: messageMenu.top, left: messageMenu.left }}>

@@ -18,6 +18,10 @@ export function hydrateCurrentUser(currentUser, hydratedUser) {
   return currentUser ? mergeCurrentUser(currentUser, hydratedUser) : hydratedUser || null;
 }
 
+export function isCurrentUser(currentUser, entityUserId) {
+  return currentUser?._id != null && entityUserId != null && String(currentUser._id) === String(entityUserId);
+}
+
 export function resolveAvatarUrl(currentUser, entityUserId, storedAvatarUrl = '') {
   if (currentUser && entityUserId && String(currentUser._id) === String(entityUserId)) return currentUser.avatarUrl || '';
   return storedAvatarUrl || '';

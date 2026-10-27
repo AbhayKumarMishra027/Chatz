@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { Block } from '../models/Block.js';
 import { Follow } from '../models/Follow.js';
+import { FollowRequest } from '../models/FollowRequest.js';
 import { Post } from '../models/Post.js';
 import { SavedPost } from '../models/SavedPost.js';
 import { User } from '../models/User.js';
@@ -22,12 +23,16 @@ searchRoutes.get('/', async (req, res, next) => {
 
     const users = await User.find({ _id: { $ne: req.user._id, $nin: blockedIds }, $or: [{ username: pattern }, { displayName: pattern }] })
       .select('username displayName headline avatarUrl isPrivate').sort({ username: 1 }).limit(8).lean();
-    const follows = users.length ? await Follow.find({ follower: req.user._id, following: { $in: users.map((person) => person._id) } }).select('following').lean() : [];
+    const [follows, requests] = users.length ? await Promise.all([
+      Follow.find({ follower: req.user._id, following: { $in: users.map((person) => person._id) } }).select('following').lean(),
+      FollowRequest.find({ follower: req.user._id, following: { $in: users.map((person) => person._id) } }).select('following').lean(),
+    ]) : [[], []];
     const followedIds = new Set(follows.map((item) => item.following.toString()));
+    const pendingIds = new Set(requests.map((item) => item.following.toString()));
     const userResults = users.map((person) => {
       const isFollowing = followedIds.has(person._id.toString());
       const { headline, avatarUrl, ...identity } = person;
-      return { ...identity, ...(person.isPrivate && !isFollowing ? {} : { headline, avatarUrl }), canViewDetails: !person.isPrivate || isFollowing, isFollowing };
+      return { ...identity, ...(person.isPrivate && !isFollowing ? {} : { headline, avatarUrl }), canViewDetails: !person.isPrivate || isFollowing, isFollowing, hasPendingFollowRequest: pendingIds.has(person._id.toString()) };
     });
 
     const matches = await Post.find({ text: pattern }).sort({ createdAt: -1, _id: -1 }).limit(60)

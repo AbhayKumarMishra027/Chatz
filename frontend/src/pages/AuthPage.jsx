@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { MessageCircle } from 'lucide-react';
 import { useAuth } from '../features/auth/AuthContext.jsx';
 import { getApiError } from '../services/api.js';
+import Brand from '../components/Brand.jsx';
 
 export default function AuthPage({ mode }) {
   const isRegister = mode === 'register';
@@ -26,7 +26,7 @@ export default function AuthPage({ mode }) {
     finally { setBusy(false); }
   }
 
-  return <main className="auth-page"><section className="auth-card"><Link to="/" className="brand auth-brand"><span className="brand-mark"><MessageCircle size={18} fill="currentColor" /></span><span>chatz<span className="brand-period">.</span></span></Link><div className="auth-eyebrow">A LITTLE SPACE TO CONNECT</div><h1>{isRegister ? 'Find your people.' : 'Welcome back.'}</h1><p className="auth-intro">{isRegister ? 'Create your account and make yourself at home.' : 'Pick up where a good conversation left off.'}</p>
+  return <main className="auth-page"><section className="auth-card"><Brand className="auth-brand" /><div className="auth-eyebrow">A LITTLE SPACE TO CONNECT</div><h1>{isRegister ? 'Find your people.' : 'Welcome back.'}</h1><p className="auth-intro">{isRegister ? 'Create your account and make yourself at home.' : 'Pick up where a good conversation left off.'}</p>
     <form className="auth-form" onSubmit={submit} aria-busy={busy}>
       {isRegister && <><label>Display name<input name="displayName" value={form.displayName} onChange={update} autoComplete="name" maxLength="60" required disabled={busy} placeholder="How people will know you" /></label><label>Username<input name="username" value={form.username} onChange={update} autoComplete="username" minLength="3" maxLength="24" pattern="[A-Za-z0-9_]+" required disabled={busy} placeholder="Choose a username" /></label><label>Email address<input name="email" type="email" value={form.email} onChange={update} autoComplete="email" maxLength="254" required disabled={busy} placeholder="you@example.com" /></label></>}
       {!isRegister && <label>Username or email<input name="username" value={form.username} onChange={update} autoComplete="username" required disabled={busy} placeholder="Your username or email" /></label>}
