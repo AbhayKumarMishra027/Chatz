@@ -353,20 +353,11 @@ Important manual checks include:
 - Mobile navigation and layout refinements remain planned.
 - The application does not currently claim end-to-end encryption, group conversations, voice/video calls, or a dedicated moderation dashboard.
 
-## 14. Demo Video and Submission
+## 14. Demo Video
 
-The end-term project guidelines request a **3–5 minute demo video** showing the problem, target users, major workflows, interesting functionality, and the working application.
+A short demonstration of Chatz showcasing its key features and major workflows.
 
-Before final submission:
-
-- Confirm that the GitHub repository is accessible.
-- Verify the deployed application and backend health endpoint.
-- Test the important workflows using separate accounts.
-- Add the public demo video URL to this README.
-- Verify that all links work without requiring extra permissions.
-
-**Official submission form:**  
-https://forms.gle/sBy4sfqyiRG2Zpom9
+**Demo Video:** [Watch Chatz Demo](YOUR_GOOGLE_DRIVE_LINK)
 
 ## 15. Author
 
