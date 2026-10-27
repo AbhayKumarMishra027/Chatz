@@ -10,6 +10,9 @@ import { commentInput, postInput } from '../utils/validation.js';
 import { User } from '../models/User.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requireClientOrigin } from '../middleware/requireClientOrigin.js';
+import { parseImageUpload, POST_IMAGE_MAX_BYTES, validateImageFile } from '../middleware/imageUpload.js';
+import { destroyCloudinaryImageIfUnreferenced, uploadCloudinaryImage } from '../services/cloudinary.js';
+import { postForClient } from '../services/postPresentation.js';
 
 export const postRoutes = Router();
 postRoutes.use(requireAuth);
@@ -43,7 +46,7 @@ async function populatePost(query, viewerId) {
   const post = await query.populate({ path: 'author', select: userProjection + ' isPrivate' }).populate({ path: 'comments.author', select: userProjection });
   if (!post || !(await canView(post, viewerId))) return null;
   const saved = await SavedPost.exists({ user: viewerId, post: post._id });
-  return { ...post.toObject(), likeCount: post.likes.length, likedByMe: post.likes.some((id) => id.toString() === viewerId.toString()), isSaved: Boolean(saved), likes: undefined };
+  return postForClient({ ...post.toObject(), likeCount: post.likes.length, likedByMe: post.likes.some((id) => id.toString() === viewerId.toString()), isSaved: Boolean(saved), likes: undefined });
 }
 
 postRoutes.get('/', async (req, res, next) => {
@@ -77,18 +80,30 @@ postRoutes.get('/', async (req, res, next) => {
     const page = visible.slice(0, limit);
     const savedRows = page.length ? await SavedPost.find({ user: req.user._id, post: { $in: page.map((post) => post._id) } }).select('post').lean() : [];
     const savedIds = new Set(savedRows.map((row) => row.post.toString()));
-    const posts = page.map((post) => ({ ...post, likeCount: post.likes.length, likedByMe: post.likes.some((id) => id.toString() === req.user.id), isSaved: savedIds.has(post._id.toString()), likes: undefined }));
+    const posts = page.map((post) => postForClient({ ...post, likeCount: post.likes.length, likedByMe: post.likes.some((id) => id.toString() === req.user.id), isSaved: savedIds.has(post._id.toString()), likes: undefined }));
     res.json({ posts, nextCursor: visible.length > limit ? page.at(-1)?._id : null });
   } catch (error) { next(error); }
 });
 
-postRoutes.post('/', requireClientOrigin, async (req, res, next) => {
+postRoutes.post('/', requireClientOrigin, parseImageUpload(POST_IMAGE_MAX_BYTES), async (req, res, next) => {
+  let uploadedAsset;
   try {
     const input = postInput.safeParse(req.body);
     if (!input.success) return res.status(400).json({ error: { message: input.error.issues.map((issue) => issue.message).join(' ') } });
-    const post = await Post.create({ ...input.data, author: req.user._id });
+    if (!input.data.text && !req.file) return res.status(400).json({ error: { message: 'Write something or attach an image to create a post.' } });
+    let image;
+    if (req.file) {
+      validateImageFile(req.file, POST_IMAGE_MAX_BYTES);
+      uploadedAsset = await uploadCloudinaryImage(req.file.buffer, `chatz/posts/${req.user.id}`);
+      image = { cloudinaryUrl: uploadedAsset.secure_url, publicId: uploadedAsset.public_id, width: uploadedAsset.width, height: uploadedAsset.height, format: uploadedAsset.format === 'jpeg' ? 'jpg' : uploadedAsset.format, bytes: uploadedAsset.bytes };
+    }
+    const post = await Post.create({ ...input.data, author: req.user._id, ...(image ? { image } : {}) });
     res.status(201).json({ post: await populatePost(Post.findById(post._id), req.user._id) });
-  } catch (error) { next(error); }
+  } catch (error) {
+    if (uploadedAsset?.public_id) await destroyCloudinaryImageIfUnreferenced(uploadedAsset.public_id).catch(() => {});
+    if ([502, 503].includes(error.status)) return res.status(error.status).json({ error: { message: error.message } });
+    next(error);
+  }
 });
 
 postRoutes.get('/:postId', async (req, res, next) => {
@@ -115,10 +130,11 @@ postRoutes.patch('/:postId', requireClientOrigin, async (req, res, next) => {
 
 postRoutes.delete('/:postId', requireClientOrigin, async (req, res, next) => {
   try {
-    const post = await Post.findById(req.params.postId);
+    const post = await Post.findById(req.params.postId).select('+image.publicId');
     if (!post) return res.status(404).json({ error: { message: 'Post not found.' } });
     if (post.author.toString() !== req.user.id) return res.status(403).json({ error: { message: 'You can only delete your own posts.' } });
     await Promise.all([post.deleteOne(), SavedPost.deleteMany({ post: post._id })]);
+    if (post.image?.publicId) await destroyCloudinaryImageIfUnreferenced(post.image.publicId).catch(() => {});
     res.status(204).end();
   } catch (error) { next(error); }
 });

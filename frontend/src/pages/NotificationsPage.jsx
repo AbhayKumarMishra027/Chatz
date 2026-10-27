@@ -12,6 +12,18 @@ const descriptions = {
   message_request: (item) => `${actorName(item)} sent you a message request.`,
 };
 const icons = { follow: UserRound, like: Heart, comment: MessageCircle, message: MessageCircle, message_request: Bell };
+function formatNotificationTime(value) {
+  const date = new Date(value);
+  const elapsed = Math.max(0, Date.now() - date.getTime());
+  const minutes = Math.floor(elapsed / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(date.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+}
 
 export default function NotificationsPage() {
   const navigate = useNavigate();
@@ -69,8 +81,9 @@ export default function NotificationsPage() {
       {unread > 0 && <button onClick={markAll}><CheckCheck size={14} /> Mark all read</button>}
     </div>
     {error && <p className="inline-error" role="alert">{error}</p>}
-    {loading ? <div className="feed-loading">Checking in…</div> : items.length ? items.map((item) => {
+    {loading ? <div className="feed-loading">Checking in…</div> : items.length ? <div className="notification-timeline">{items.map((item) => {
       const Icon = icons[item.type] || Bell;
+      const notificationDate = new Date(item.createdAt);
       return <article
         className={`notification-row${item.readAt ? '' : ' unread'}`}
         key={item._id}
@@ -84,11 +97,11 @@ export default function NotificationsPage() {
           }
         }}
       >
-        <div className="notification-icon"><Icon size={16} /></div>
-        <p>{descriptions[item.type]?.(item) || 'You have a new update.'}<time>{new Date(item.createdAt).toLocaleString()}</time></p>
+        <div className={`notification-icon notification-icon-${item.type}`}><Icon size={18} strokeWidth={1.9} /></div>
+        <p>{descriptions[item.type]?.(item) || 'You have a new update.'}<time dateTime={notificationDate.toISOString()} title={notificationDate.toLocaleString()}>{formatNotificationTime(item.createdAt)}</time></p>
         {!item.readAt && <span className="notification-dot" />}
       </article>;
-    }) : <div className="social-empty">
+    })}</div> : <div className="social-empty">
       <div className="empty-icon"><Bell size={18} /></div>
       <h3>Nothing new, for now.</h3>
       <p>Your follows, replies, and messages will show up here.</p>

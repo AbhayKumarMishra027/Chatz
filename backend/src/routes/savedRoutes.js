@@ -5,6 +5,7 @@ import { Post } from '../models/Post.js';
 import { SavedPost } from '../models/SavedPost.js';
 import { Block } from '../models/Block.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { postForClient } from '../services/postPresentation.js';
 
 export const savedRoutes = Router();
 savedRoutes.use(requireAuth);
@@ -25,7 +26,7 @@ savedRoutes.get('/', async (req, res, next) => {
       if (!post) continue;
       const blocked = post.author._id.toString() !== req.user.id && await Block.exists({ $or: [{ blocker: req.user._id, blocked: post.author._id }, { blocker: post.author._id, blocked: req.user._id }] });
       if (!blocked && (post.author._id.toString() === req.user.id || ((!post.author.isPrivate && post.visibility === 'public') || await Follow.exists({ follower: req.user._id, following: post.author._id })))) {
-        permitted.push({ ...post.toObject(), likeCount: post.likes.length, likedByMe: post.likes.some((id) => id.toString() === req.user.id), isSaved: true, likes: undefined });
+        permitted.push(postForClient({ ...post.toObject(), likeCount: post.likes.length, likedByMe: post.likes.some((id) => id.toString() === req.user.id), isSaved: true, likes: undefined }));
       }
       if (permitted.length > limit) break;
     }

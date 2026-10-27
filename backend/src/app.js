@@ -14,6 +14,7 @@ import { messageRoutes } from './routes/messageRoutes.js';
 import { notificationRoutes } from './routes/notificationRoutes.js';
 import { reportRoutes } from './routes/reportRoutes.js';
 import { searchRoutes } from './routes/searchRoutes.js';
+import { mediaRoutes } from './routes/mediaRoutes.js';
 
 export const app = express();
 app.disable('x-powered-by');
@@ -32,6 +33,7 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/media', mediaRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

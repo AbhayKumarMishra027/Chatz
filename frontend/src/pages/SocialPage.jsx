@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
-import { Bookmark, Flag, Heart, MessageCircle, Pencil, Send, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Bookmark, Flag, Heart, ImagePlus, MessageCircle, Pencil, Send, Trash2, X } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
-import { api, getApiError } from '../services/api.js';
+import { api, getApiError, mediaCrossOrigin, mediaUrl } from '../services/api.js';
+import Avatar from '../components/Avatar.jsx';
 import { useAuth } from '../features/auth/AuthContext.jsx';
 import { useParams } from 'react-router-dom';
+import { imageSelectionError, POST_IMAGE_MAX_BYTES } from '../utils/imageValidation.js';
 
 export function PostCard({ post, onChange, showOpenLink = false }) {
   const { user } = useAuth();
@@ -52,7 +54,7 @@ export function PostCard({ post, onChange, showOpenLink = false }) {
     catch (requestError) { setError(getApiError(requestError)); }
   }
   const mine = post.author?._id === user._id;
-  return <article className="post-card"><header className="post-header"><div className="avatar post-avatar">{post.author?.displayName?.slice(0, 1).toUpperCase() || '?'}</div><div className="post-author"><strong>{post.author?.displayName || 'Chatz member'}</strong><span>@{post.author?.username || 'member'} · {new Date(post.createdAt).toLocaleDateString()}</span></div>{mine ? <div className="post-tools"><button onClick={() => { setEditText(post.text); setEditing((value) => !value); }} aria-label="Edit post"><Pencil size={13} /></button><button onClick={deletePost} aria-label="Delete post"><Trash2 size={14} /></button></div> : <button className="post-report" onClick={() => setReporting((value) => !value)} aria-label="Report post"><Flag size={13} /></button>}</header>{editing ? <form className="edit-post-form" onSubmit={saveEdit}><textarea value={editText} onChange={(event) => setEditText(event.target.value)} maxLength="2000" required /><div><button type="button" className="text-button" onClick={() => setEditing(false)}>Cancel</button><button className="outline-button" disabled={busy || !editText.trim()}>Save edit</button></div></form> : <p className="post-text">{post.text}</p>}{reporting && <form className="report-form" onSubmit={reportPost}><label>Report reason<select value={reportReason} onChange={(event) => setReportReason(event.target.value)}><option value="inappropriate">Inappropriate content</option><option value="spam">Spam</option><option value="harassment">Harassment</option><option value="other">Other</option></select></label><button className="outline-button">Submit report</button></form>}{reportNotice && <p className="success-message">{reportNotice}</p>}<div className="post-actions"><button className={`post-action${post.likedByMe ? ' selected' : ''}`} onClick={toggleLike} disabled={busy} aria-label={post.likedByMe ? 'Unlike post' : 'Like post'}><Heart size={16} fill={post.likedByMe ? 'currentColor' : 'none'} />{post.likeCount || 0}</button><button className={`post-action${commentsOpen ? ' selected' : ''}`} onClick={() => setCommentsOpen((open) => !open)} aria-expanded={commentsOpen} aria-label={`${commentsOpen ? 'Hide' : 'Show'} ${post.comments?.length || 0} comments`}><MessageCircle size={16} />{post.comments?.length || 0}</button>{showOpenLink && <NavLink className="post-open-link" to={`/p/${post._id}`}>Open post</NavLink>}<button className={`post-action save-action${post.isSaved ? ' selected' : ''}`} onClick={toggleSave} disabled={busy} aria-label={post.isSaved ? 'Remove saved post' : 'Save post'}><Bookmark size={16} fill={post.isSaved ? 'currentColor' : 'none'} /></button></div>{commentsOpen && <><div className="comment-list">{post.comments?.slice(-3).map((item) => <div className="comment" key={item._id}><strong>{item.author?.displayName || 'Member'}</strong><span>{item.text}</span></div>)}{!post.comments?.length && <p className="comments-empty">No comments yet. Start the conversation.</p>}</div><form className="comment-form" onSubmit={addComment}><input value={comment} onChange={(event) => setComment(event.target.value)} maxLength="1000" placeholder="Add a thoughtful comment…" aria-label="Add a comment" /><button disabled={busy || !comment.trim()} aria-label="Send comment"><Send size={15} /></button></form></>}{error && <p className="inline-error" role="alert">{error}</p>}</article>;
+  return <article className="post-card"><header className="post-header"><Avatar className="post-avatar" src={post.author?.avatarUrl} name={post.author?.displayName || 'Chatz member'} userId={post.author?._id} size={40} /><div className="post-author"><strong>{post.author?.displayName || 'Chatz member'}</strong><span>@{post.author?.username || 'member'} · {new Date(post.createdAt).toLocaleDateString()}</span></div>{mine ? <div className="post-tools"><button onClick={() => { setEditText(post.text); setEditing((value) => !value); }} aria-label="Edit post"><Pencil size={13} /></button><button className="post-delete-action" onClick={deletePost} aria-label="Delete post"><Trash2 size={14} /></button></div> : <button className="post-report" onClick={() => setReporting((value) => !value)} aria-label="Report post"><Flag size={13} /></button>}</header>{editing ? <form className="edit-post-form" onSubmit={saveEdit}><textarea value={editText} onChange={(event) => setEditText(event.target.value)} maxLength="2000" required /><div><button type="button" className="text-button" onClick={() => setEditing(false)}>Cancel</button><button className="outline-button" disabled={busy || !editText.trim()}>Save edit</button></div></form> : post.text && <p className="post-text">{post.text}</p>}{post.image?.url && <figure className="post-image-frame"><img src={mediaUrl(post.image.url)} crossOrigin={mediaCrossOrigin(post.image.url)} alt={`Image shared by ${post.author?.displayName || 'a Chatz member'}`} loading="lazy" /></figure>}{reporting && <form className="report-form" onSubmit={reportPost}><label>Report reason<select value={reportReason} onChange={(event) => setReportReason(event.target.value)}><option value="inappropriate">Inappropriate content</option><option value="spam">Spam</option><option value="harassment">Harassment</option><option value="other">Other</option></select></label><button className="outline-button">Submit report</button></form>}{reportNotice && <p className="success-message">{reportNotice}</p>}<div className="post-actions"><button className={`post-action post-action-like${post.likedByMe ? ' selected' : ''}`} aria-pressed={Boolean(post.likedByMe)} onClick={toggleLike} disabled={busy} aria-label={post.likedByMe ? 'Unlike post' : 'Like post'}><Heart size={16} fill={post.likedByMe ? 'currentColor' : 'none'} />{post.likeCount || 0}</button><button className={`post-action post-action-comment${commentsOpen ? ' selected' : ''}`} aria-pressed={commentsOpen} onClick={() => setCommentsOpen((open) => !open)} aria-expanded={commentsOpen} aria-label={`${commentsOpen ? 'Hide' : 'Show'} ${post.comments?.length || 0} comments`}><MessageCircle size={16} />{post.comments?.length || 0}</button>{showOpenLink && <NavLink className="post-open-link" to={`/p/${post._id}`}>Open post</NavLink>}<button className={`post-action post-action-save save-action${post.isSaved ? ' selected' : ''}`} aria-pressed={Boolean(post.isSaved)} onClick={toggleSave} disabled={busy} aria-label={post.isSaved ? 'Remove saved post' : 'Save post'}><Bookmark size={16} fill={post.isSaved ? 'currentColor' : 'none'} /></button></div>{commentsOpen && <><div className="comment-list">{post.comments?.slice(-3).map((item) => <div className="comment" key={item._id}><Avatar className="comment-avatar" src={item.author?.avatarUrl} name={item.author?.displayName || 'Member'} userId={item.author?._id} size={30} /><div className="comment-copy"><strong>{item.author?.displayName || 'Member'}</strong><span>{item.text}</span></div></div>)}{!post.comments?.length && <p className="comments-empty">No comments yet. Start the conversation.</p>}</div><form className="comment-form" onSubmit={addComment}><input value={comment} onChange={(event) => setComment(event.target.value)} maxLength="1000" placeholder="Add a thoughtful comment…" aria-label="Add a comment" /><button disabled={busy || !comment.trim()} aria-label="Send comment"><Send size={15} /></button></form></>}{error && <p className="inline-error" role="alert">{error}</p>}</article>;
 }
 
 export function PostDetail({ postId }) {
@@ -72,6 +74,7 @@ export function PostDetail({ postId }) {
 }
 
 export default function SocialPage({ mode = 'following', username: givenUsername }) {
+  const { user } = useAuth();
   const routeParams = useParams();
   const username = givenUsername || routeParams.username;
   const [posts, setPosts] = useState([]);
@@ -81,6 +84,9 @@ export default function SocialPage({ mode = 'following', username: givenUsername
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState('');
+  const imageInputRef = useRef(null);
   async function load() {
     setLoading(true); setError('');
     try {
@@ -91,13 +97,55 @@ export default function SocialPage({ mode = 'following', username: givenUsername
     finally { setLoading(false); }
   }
   useEffect(() => { load(); }, [mode, username]);
+  useEffect(() => {
+    if (!imageFile) { setImagePreview(''); return undefined; }
+    const previewUrl = URL.createObjectURL(imageFile);
+    setImagePreview(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [imageFile]);
   async function createPost(event) {
-    event.preventDefault(); if (!text.trim()) return;
+    event.preventDefault(); if (!text.trim() && !imageFile) return;
     setBusy(true); setError(''); setSuccess('');
-    try { await api.post('/api/posts', { text: text.trim(), visibility }); setText(''); setSuccess('Your post is live.'); await load(); }
+    try {
+      if (imageFile) {
+        const form = new FormData();
+        form.append('text', text.trim());
+        form.append('visibility', visibility);
+        form.append('image', imageFile);
+        await api.post('/api/posts', form);
+      } else await api.post('/api/posts', { text: text.trim(), visibility });
+      setText(''); setImageFile(null); setSuccess('Your post is live.'); await load();
+    }
     catch (requestError) { setError(getApiError(requestError)); }
     finally { setBusy(false); }
   }
-  const title = mode === 'saved' ? 'Saved posts' : mode === 'explore' ? 'Explore posts' : mode === 'profile' ? 'Posts' : 'Your feed';
-  return <section className="social-page"><div className="social-page-heading"><div><span className="section-kicker">{mode === 'following' ? 'FOLLOWING' : mode === 'saved' ? 'JUST FOR YOU' : mode === 'profile' ? 'ON THIS PROFILE' : 'FROM THE COMMUNITY'}</span><h2>{title}</h2></div><button className="refresh-button" onClick={load} disabled={loading}>Refresh</button></div>{mode === 'following' && <form className="composer" onSubmit={createPost}><div className="composer-top"><textarea value={text} onChange={(event) => setText(event.target.value)} maxLength="2000" placeholder="What’s on your mind? Share it with your community…" aria-label="Write a post" /><span>{text.length}/2000</span></div><div className="composer-bottom"><label className="visibility-label">Visible to <select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">Everyone</option><option value="followers">Followers</option></select></label><button className="primary-button" disabled={busy || !text.trim()}>{busy ? 'Sharing…' : 'Share post'} <span>↗</span></button></div></form>}{success && <p className="success-message" role="status">{success}</p>}{error && <p className="inline-error" role="alert">{error}</p>}{loading ? <div className="feed-loading">Gathering conversations…</div> : posts.length ? <div className="post-list">{posts.map((post) => <PostCard key={post._id} post={post} onChange={load} showOpenLink={mode === 'profile'} />)}</div> : <div className="social-empty"><div className="empty-icon"><MessageCircle size={19} /></div><h3>{mode === 'following' ? 'Your feed starts with a hello.' : mode === 'saved' ? 'Nothing saved yet.' : 'A fresh start.'}</h3><p>{mode === 'following' ? 'Follow people to see their posts here, or share your own thought.' : mode === 'saved' ? 'Save posts you want to come back to.' : 'No posts are available here yet.'}</p>{mode === 'following' && <NavLink className="primary-button" to="/explore">Find people to follow <span>→</span></NavLink>}</div>}</section>;
+  function selectPostImage(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const validationError = imageSelectionError(file, POST_IMAGE_MAX_BYTES);
+    if (validationError) { setImageFile(null); setError(validationError); return; }
+    setError(''); setImageFile(file);
+  }
+  const title = mode === 'saved' ? 'Saved posts' : mode === 'explore' ? 'Public posts' : mode === 'profile' ? 'Posts' : 'Your feed';
+  const kicker = mode === 'saved' ? 'BOOKMARKED BY YOU' : mode === 'profile' ? 'ON THIS PROFILE' : mode === 'explore' ? 'PUBLIC POSTS' : 'FROM THE COMMUNITY';
+  const isHome = mode === 'following';
+  const homeComposer = isHome ? <form className="composer home-composer" onSubmit={createPost} aria-busy={busy}>
+    <div className="composer-author"><Avatar className="composer-avatar" src={user.avatarUrl} name={user.displayName} userId={user._id} size={38} /><div className="composer-author-copy"><strong>{user.displayName}</strong><span>Share something with your community</span></div></div>
+    <div className="composer-editor"><textarea id="home-post-text" value={text} onChange={(event) => setText(event.target.value)} maxLength="2000" placeholder="What's on your mind? Share it with your community..." aria-label="Write a post" aria-describedby="home-post-count" disabled={busy} /><span id="home-post-count" aria-live="polite">{text.length}/2000</span></div>
+    {imagePreview && <div className="composer-image-preview"><img src={imagePreview} alt="Selected image preview" /><button type="button" onClick={() => setImageFile(null)} disabled={busy} aria-label="Remove selected image"><X size={16} /></button></div>}
+    <div className="composer-bottom"><div className="composer-bottom-controls"><label className="visibility-label" htmlFor="home-post-visibility">Visible to <select id="home-post-visibility" value={visibility} onChange={(event) => setVisibility(event.target.value)} disabled={busy}><option value="public">Everyone</option><option value="followers">Followers</option></select></label><input ref={imageInputRef} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={selectPostImage} disabled={busy} /><button type="button" className="composer-image-button" onClick={() => imageInputRef.current?.click()} disabled={busy} aria-label="Add an image to your post"><ImagePlus size={17} /><span>Add image</span></button></div><button className="primary-button" disabled={busy || (!text.trim() && !imageFile)}>{busy ? 'Publishing...' : 'Share post'} <span>→</span></button></div>
+  </form> : null;
+  const feedback = <>{success && <p className="success-message" role="status">{success}</p>}{error && <p className="inline-error" role="alert">{error}</p>}</>;
+
+  return <section className={`social-page${isHome ? ' home-feed' : mode === 'saved' ? ' saved-feed' : mode === 'explore' ? ' explore-post-feed' : ''}`} aria-label={isHome ? 'Home feed' : title}>
+    {isHome && <section className="home-composer-section" aria-label="Create a post"><h2 className="sr-only">Create a post</h2>{homeComposer}{feedback}</section>}
+    {!isHome && feedback}
+    <section className="social-feed-section" aria-labelledby={`social-feed-title-${mode}`}>
+      <div className={`social-page-heading${isHome ? ' feed-toolbar' : ''}`} aria-label={isHome ? 'Feed controls' : undefined}><div>{mode !== 'following' && mode !== 'explore' && <span className="section-kicker">{kicker}</span>}<h2 id={`social-feed-title-${mode}`}>{title}</h2></div><button className="refresh-button" onClick={load} disabled={loading}>Refresh</button></div>
+      <div className="feed-posts" aria-busy={loading} aria-label={`${title} posts`}>
+        {loading ? <div className="feed-loading" role="status">Loading posts...</div> : posts.length ? <div className="post-list">{posts.map((post) => <PostCard key={post._id} post={post} onChange={load} showOpenLink={mode === 'profile'} />)}</div> : <div className="social-empty"><div className="empty-icon"><MessageCircle size={19} /></div><h3>{mode === 'following' ? 'Your feed starts with a hello.' : mode === 'saved' ? 'Nothing saved yet.' : 'A fresh start.'}</h3><p>{mode === 'following' ? 'Follow people to see their posts here, or share your own thought.' : mode === 'saved' ? 'Save a post with its bookmark control to keep it here for later.' : mode === 'explore' ? 'Public posts will appear here when the community shares them.' : 'No posts are available here yet.'}</p>{mode === 'following' && <NavLink className="primary-button" to="/explore">Find people to follow <span>→</span></NavLink>}{mode === 'saved' && <NavLink className="saved-empty-link" to="/explore">Explore public posts <span>→</span></NavLink>}</div>}
+      </div>
+    </section>
+  </section>;
 }

@@ -6,6 +6,7 @@ import { SavedPost } from '../models/SavedPost.js';
 import { User } from '../models/User.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { canView } from './postRoutes.js';
+import { postForClient } from '../services/postPresentation.js';
 
 export const searchRoutes = Router();
 searchRoutes.use(requireAuth);
@@ -40,7 +41,7 @@ searchRoutes.get('/', async (req, res, next) => {
     }
     const savedRows = visible.length ? await SavedPost.find({ user: req.user._id, post: { $in: visible.map((post) => post._id) } }).select('post').lean() : [];
     const savedIds = new Set(savedRows.map((item) => item.post.toString()));
-    const postResults = visible.map((post) => ({ ...post, likeCount: post.likes.length,
+    const postResults = visible.map((post) => postForClient({ ...post, likeCount: post.likes.length,
       likedByMe: post.likes.some((id) => id.toString() === req.user.id), isSaved: savedIds.has(post._id.toString()), likes: undefined }));
     res.json({ users: userResults, posts: postResults });
   } catch (error) { next(error); }

@@ -9,9 +9,14 @@ const userSchema = new mongoose.Schema({
   headline: { type: String, trim: true, maxlength: 100, default: '' },
   profileLink: { type: String, trim: true, maxlength: 200, default: '' },
   avatarUrl: { type: String, default: '' },
+  avatarCloudinaryUrl: { type: String, default: '', select: false },
+  avatarPublicId: { type: String, default: '', select: false },
+  avatarFormat: { type: String, default: '', select: false },
+  avatarBytes: { type: Number, default: 0, select: false },
+  avatarRevision: { type: Number, default: 0, select: false },
   isPrivate: { type: Boolean, default: false },
   messagePreference: { type: String, enum: ['everyone', 'followers', 'nobody'], default: 'followers' },
-}, { timestamps: true, toJSON: { transform(_doc, ret) { delete ret.passwordHash; delete ret.email; return ret; } } });
+}, { timestamps: true, toJSON: { transform(_doc, ret) { delete ret.passwordHash; delete ret.email; delete ret.avatarCloudinaryUrl; delete ret.avatarPublicId; delete ret.avatarFormat; delete ret.avatarBytes; delete ret.avatarRevision; return ret; } } });
 
 userSchema.index({ username: 1 }, { unique: true });
 userSchema.index({ email: 1 }, { unique: true });

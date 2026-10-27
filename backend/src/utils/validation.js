@@ -10,5 +10,5 @@ export const registerSchema = z.object({
 });
 
 export const loginSchema = z.object({ identifier: z.string().trim().min(1).max(254), password: z.string().min(1).max(128) });
-export const postInput = z.object({ text: z.string().trim().min(1).max(2000), visibility: z.enum(['public', 'followers']).default('public') }).strict();
+export const postInput = z.object({ text: z.string().trim().max(2000).default(''), visibility: z.enum(['public', 'followers']).default('public') }).strict();
 export const commentInput = z.object({ text: z.string().trim().min(1).max(1000) }).strict();

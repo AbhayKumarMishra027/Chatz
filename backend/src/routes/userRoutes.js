@@ -10,6 +10,9 @@ import { createNotification } from '../services/notifications.js';
 import { Post } from '../models/Post.js';
 import { SavedPost } from '../models/SavedPost.js';
 import { decideFollowRequest, followProfile, hasAcceptedFollow } from '../services/followRequests.js';
+import { parseImageUpload, AVATAR_IMAGE_MAX_BYTES, validateImageFile } from '../middleware/imageUpload.js';
+import { destroyCloudinaryImageIfUnreferenced, uploadCloudinaryImage } from '../services/cloudinary.js';
+import { postForClient } from '../services/postPresentation.js';
 
 export const userRoutes = Router();
 const updateSchema = z.object({
@@ -155,6 +158,33 @@ userRoutes.patch('/me', requireAuth, requireClientOrigin, async (req, res, next)
   } catch (error) { next(error); }
 });
 
+userRoutes.post('/me/avatar', requireAuth, requireClientOrigin, parseImageUpload(AVATAR_IMAGE_MAX_BYTES), async (req, res, next) => {
+  let uploadedAsset;
+  try {
+    validateImageFile(req.file, AVATAR_IMAGE_MAX_BYTES);
+    uploadedAsset = await uploadCloudinaryImage(req.file.buffer, `chatz/avatars/${req.user.id}`);
+    const user = await User.findById(req.user.id).select('+avatarCloudinaryUrl +avatarPublicId +avatarFormat +avatarBytes +avatarRevision');
+    if (!user) {
+      await destroyCloudinaryImageIfUnreferenced(uploadedAsset.public_id).catch(() => {});
+      return res.status(404).json({ error: { message: 'Account not found.' } });
+    }
+    const oldPublicId = user.avatarPublicId;
+    user.avatarRevision = (user.avatarRevision || 0) + 1;
+    user.avatarUrl = `/api/media/avatars/${user._id}/image?v=${user.avatarRevision}`;
+    user.avatarCloudinaryUrl = uploadedAsset.secure_url;
+    user.avatarPublicId = uploadedAsset.public_id;
+    user.avatarFormat = uploadedAsset.format === 'jpeg' ? 'jpg' : uploadedAsset.format;
+    user.avatarBytes = uploadedAsset.bytes;
+    await user.save();
+    if (oldPublicId && oldPublicId !== uploadedAsset.public_id) await destroyCloudinaryImageIfUnreferenced(oldPublicId).catch(() => {});
+    res.json({ user: user.toJSON() });
+  } catch (error) {
+    if (uploadedAsset?.public_id) await destroyCloudinaryImageIfUnreferenced(uploadedAsset.public_id).catch(() => {});
+    if ([502, 503].includes(error.status)) return res.status(error.status).json({ error: { message: error.message } });
+    next(error);
+  }
+});
+
 userRoutes.get('/:username/posts', requireAuth, async (req, res, next) => {
   try {
     const profile = await User.findOne({ username: req.params.username.toLowerCase() }).select('_id isPrivate');
@@ -169,7 +199,7 @@ userRoutes.get('/:username/posts', requireAuth, async (req, res, next) => {
     const posts = await Post.find(query).sort({ createdAt: -1, _id: -1 }).limit(limit).populate('author', 'username displayName avatarUrl headline').populate('comments.author', 'username displayName avatarUrl').lean();
     const saved = posts.length ? await SavedPost.find({ user: req.user._id, post: { $in: posts.map((post) => post._id) } }).select('post').lean() : [];
     const savedIds = new Set(saved.map((item) => item.post.toString()));
-    res.json({ posts: posts.map((post) => ({ ...post, likeCount: post.likes.length, likedByMe: post.likes.some((id) => id.toString() === req.user.id), isSaved: savedIds.has(post._id.toString()), likes: undefined })) });
+    res.json({ posts: posts.map((post) => postForClient({ ...post, likeCount: post.likes.length, likedByMe: post.likes.some((id) => id.toString() === req.user.id), isSaved: savedIds.has(post._id.toString()), likes: undefined })) });
   } catch (error) { next(error); }
 });
 

@@ -7,6 +7,9 @@ const envSchema = z.object({
   MONGODB_URI: z.string().optional().default(''),
   JWT_SECRET: z.string().optional().default(''),
   CLIENT_URL: z.string().url().default('http://localhost:5173'),
+  CLOUDINARY_CLOUD_NAME: z.string().optional().default(''),
+  CLOUDINARY_API_KEY: z.string().optional().default(''),
+  CLOUDINARY_API_SECRET: z.string().optional().default(''),
 });
 
 const result = envSchema.safeParse(process.env);
