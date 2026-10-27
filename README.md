@@ -1,125 +1,379 @@
-# Chatz
+# Chatz — A Little Space to Connect
 
-Chatz is a responsive social space for sharing ideas and having thoughtful direct conversations.
+**Chatz** is a full-stack social and messaging web application that brings community posts and private conversations together in one place.
 
-## Problem and audience
+🔗 **Live Application:** https://chatz-khaki.vercel.app  
+⚙️ **Backend API:** https://chatz-ulbz.onrender.com  
+💻 **GitHub Repository:** https://github.com/AbhayKumarMishra027/Chatz  
+🎬 **Demo Video:** _Add the public 3–5 minute demo video link before submission._
 
-Professional and community conversations often end up split across public feeds and disconnected private chats. Chatz gives people one place to discover community posts and continue a conversation privately. It is designed for students, professional communities, and small groups who want a calmer social feed with direct messaging.
+---
 
-## Features implemented
+## 1. Problem Statement
 
-- Open registration, login/logout, HttpOnly cookie sessions, and editable profiles.
-- Public and followers-only posts, following and Explore feeds, likes, comments, and private saved posts.
-- User search, follow/unfollow, private profiles, and block/unblock.
-- Persistent one-to-one messages, requests, unread counts, read state, typing/presence, and message deletion actions.
-- In-app notifications and user/post reporting.
-- Responsive layout, mobile navigation, and locally persisted light/dark theme.
+Online communities often use separate platforms for sharing updates, discovering people, and having private conversations. This can make it harder to maintain a connected community experience.
 
-Posts and messages are text-only. Image uploads are not configured.
+Chatz aims to bring these interactions together in a single application, allowing users to publish posts, discover people, manage relationships, and communicate privately.
 
-## Current status
+## 2. Target Users
 
-The repository currently includes account registration and sessions, profile editing and privacy, follows, visibility-filtered posts, comments, likes, private saves, search, blocks, reports, notifications, message requests, persistent one-to-one messages, and Socket.IO delivery/presence/typing. Avatar and post media uploads, E2EE, group conversations, and a moderator dashboard are not included. The interface does not use seeded accounts or fabricated posts.
+Chatz is designed for:
+- Students and college communities
+- People building professional or interest-based networks
+- Small communities that want social sharing and direct messaging in one place
 
-## Stack and architecture
+## 3. Key Features
 
-- `frontend/`: React, Vite, React Router, Axios, Socket.IO client, responsive CSS.
-- `backend/`: Node.js, Express, Mongoose, MongoDB Atlas, Socket.IO, bcrypt, JWT, Zod.
-- `backend/src/config/`: environment and database configuration.
-- `backend/src/middleware/`: shared error and 404 handling.
+### Authentication and Profiles
+- User registration, login, and logout
+- Cookie-based authentication using HttpOnly cookies
+- Editable user profiles and privacy preferences
+- Public and private profile support
 
-The browser talks to a resource-oriented REST API. Socket.IO uses the authenticated session cookie for message delivery, typing, and presence. MongoDB stores persistent application data. The MVP does not claim end-to-end encryption.
+### Social Feed
+- Create and view posts
+- Public and followers-only post visibility
+- Like and comment on posts
+- Save posts privately
+- Follow and unfollow users
 
-The API is grouped under `/api/auth`, `/api/users`, `/api/posts`, `/api/saved`, `/api/messages`, `/api/notifications`, and `/api/reports`, plus `GET /api/health`. Requests require an authenticated cookie except health and the registration/login endpoints.
+### Discovery and Community
+- Search for users and discover public content
+- Follow relationships and private-account follow requests
+- Block and unblock accounts
+- Notifications for relevant account and social activity
+- Report users or content
 
-## Data model overview
+### Direct Messaging
+- Persistent one-to-one conversations
+- Message requests and request handling
+- Read state and unread counts
+- Real-time message delivery, typing indicators, and presence using Socket.IO
+- Message deletion actions
 
-- `User` stores normalized identity, hashed password, profile/privacy fields, and messaging preference.
-- `Follow` has a unique follower/following pair; `Block` has a unique blocker/blocked pair.
-- `Post` stores author, visibility, likes, and embedded comments; `SavedPost` is a private, unique user/post relation.
-- `Conversation` stores a canonical one-to-one participant pair and request status; `Message` stores persistent history, read state, and per-user deletion state.
-- `Notification` is recipient-scoped; `Report` persists user/content reports while hiding the reporter reference from normal queries.
+### Media
+- Cloudinary integration for image storage
+- Backend media routes for avatars and post images
+- Image availability depends on valid Cloudinary configuration and successful production integration
 
-Indexes cover identity uniqueness, relationships, feed ordering, conversation membership, message history, notifications, and report queues.
+### User Experience
+- React-based interface with responsive styling
+- Light and dark themes
+- Dedicated pages for Home, Explore, Messages, Notifications, Saved, Profile, and Settings
 
-## Requirements
+> Features are described from the implementation and repository structure. Production behavior should be confirmed using the deployed application before treating every workflow as verified.
 
-- Node.js 20.19+ or 22.12+ and npm.
-- A MongoDB Atlas cluster for the API.
+## 4. Technology Stack
 
-## Local setup
+| Layer | Technologies |
+|---|---|
+| Frontend | React, Vite, React Router |
+| API communication | Axios |
+| Real-time communication | Socket.IO Client, Socket.IO |
+| Backend | Node.js, Express |
+| Database | MongoDB Atlas, Mongoose |
+| Authentication | JWT, bcrypt, HttpOnly cookies |
+| Validation | Zod |
+| Security | Helmet, CORS, express-rate-limit |
+| Media storage | Cloudinary |
+| Frontend hosting | Vercel |
+| Backend hosting | Render |
+| Version control | Git, GitHub |
 
-1. Install dependencies from the repository root:
+## 5. Architecture
 
-   ```sh
-   npm install
-   ```
+Chatz uses a frontend/backend architecture with persistent database storage and real-time communication.
 
-2. Copy `backend/.env.example` to `backend/.env` and configure the required values:
+```text
+                 User's Browser
+                       |
+                       v
+              Vercel: React + Vite
+                       |
+              REST API + Socket.IO
+                       |
+                       v
+              Render: Express API
+                 /           \
+                v             v
+         MongoDB Atlas     Cloudinary
+         Application Data  Image Storage
+```
 
-   ```env
-   NODE_ENV=development
-   PORT=5000
-   MONGODB_URI=mongodb+srv://...
-   JWT_SECRET=<at-least-32-random-characters>
-   CLIENT_URL=http://localhost:5173
-   ```
+### Main components
 
-   Generate a secret locally, for example with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`. Keep `.env` files private; they are ignored by Git.
+- **Frontend (`frontend/`)**: React pages, navigation, forms, client-side state, API calls, and Socket.IO client integration.
+- **Backend (`backend/`)**: Express routes, authentication, validation, authorization, error handling, and real-time communication.
+- **Database**: MongoDB stores users, relationships, posts, messages, notifications, and other application records.
+- **Media storage**: Cloudinary stores uploaded images when media configuration is available.
 
-3. Optionally copy `frontend/.env.example` to `frontend/.env` and set `VITE_API_URL` if the API is not running at `http://localhost:5000`.
+The REST API is organized around resources such as authentication, users, posts, saved posts, messages, notifications, reports, and media.
 
-4. Start both development servers:
+The application does not claim end-to-end encryption.
 
-   ```sh
-   npm run dev
-   ```
+## 6. Project Structure
 
-   The frontend is at `http://localhost:5173`; the API health endpoint is `http://localhost:5000/api/health`.
+```text
+Chatz/
+├── frontend/
+│   ├── src/
+│   ├── public/
+│   ├── package.json
+│   ├── vite.config.js
+│   └── vercel.json
+├── backend/
+│   ├── src/
+│   │   ├── config/
+│   │   ├── middleware/
+│   │   ├── models/
+│   │   ├── realtime/
+│   │   ├── routes/
+│   │   └── services/
+│   ├── test/
+│   ├── package.json
+│   └── .env.example
+├── package.json
+└── README.md
+```
 
-If you need the servers separately, run `npm run dev:backend` and `npm run dev:frontend` in two terminals.
+## 7. Local Setup
 
-## MongoDB Atlas setup
+### Prerequisites
 
-1. Create a MongoDB Atlas account and a free-tier cluster.
-2. Create a database user with a strong password. Use a narrowly scoped database user for this application.
-3. Configure Network Access for the backend host. For local development, allow your current public IP; for deployment, use a supported static egress IP or the hosting provider's documented network setup. Avoid leaving unrestricted access enabled as a permanent setting.
-4. Select **Connect → Drivers** and copy the Node.js connection URI. Replace the password placeholder and specify a database name.
-5. Put the URI in `MONGODB_URI` in `backend/.env`; do not put it in the frontend or commit it.
-6. Start the API. It connects on startup and logs a success message or a useful startup error. Mongoose creates collections when the application first writes data; manual collection setup is not needed.
+- Node.js compatible with the project's Vite requirements (Node.js 20.19+ or 22.12+)
+- npm
+- A MongoDB Atlas database, or another appropriately configured MongoDB instance
+- Cloudinary credentials if you want to use media uploads
 
-## Scripts
+### Step 1: Clone the repository
 
-- `npm run dev` — run frontend and backend in development mode.
-- `npm run build` — build the frontend for production.
-- `npm start` — start the backend (requires its environment variables and MongoDB access).
+```bash
+git clone https://github.com/AbhayKumarMishra027/Chatz.git
+cd Chatz
+```
 
-## Verification
+### Step 2: Install dependencies
 
-- `npm run build` builds the frontend.
-- `GET http://localhost:5000/api/health` checks that the API responds.
-- With Atlas configured, manually verify two accounts, duplicate registration, profile privacy, follow/unfollow, post visibility and CRUD, likes/comments/saves, message request accept/reject, blocks, unread/read state, and responsive mobile navigation. The database workflows still need to be exercised against a configured Atlas database.
+From the repository root:
 
-## Deployment plan
+```bash
+npm install
+```
 
-- Deploy `frontend/` to Vercel with the project root set to `frontend` and `VITE_API_URL` pointing to the backend URL. `frontend/vercel.json` rewrites client routes to `index.html`.
-- Deploy `backend/` to Render with the root directory set to `backend`; use `npm install` to install dependencies and `npm start` to run. Configure `MONGODB_URI`, a cryptographically random `JWT_SECRET`, `CLIENT_URL` set to the deployed frontend origin, and `NODE_ENV=production`. Render supplies `PORT`; the server listens on it.
-- Configure Atlas network access so the deployed backend can reach the database without leaving the database open to the entire internet.
-- Configure credentials only in each provider's environment settings. HTTPS, cross-origin cookie settings, and Socket.IO origin configuration must match the deployed frontend before authentication or real-time features are enabled.
+### Step 3: Configure the backend
 
-No deployment has been performed or verified yet. Do not push or deploy until you are ready to publish the repository.
+Copy `backend/.env.example` to `backend/.env` and configure:
 
-## Security notes
+```env
+NODE_ENV=development
+PORT=5000
+MONGODB_URI=your_mongodb_connection_string
+JWT_SECRET=your_random_secret_of_at_least_32_characters
+CLIENT_URL=http://localhost:5173
 
-The API applies Helmet, an explicit credentialed CORS origin, JSON body limits, a general API rate limit, and stricter authentication and report rate limits. Passwords are bcrypt hashed. Sessions use an HttpOnly cookie; mutations require the configured frontend Origin. Profile and post visibility, follow/block rules, message-request permissions, and Socket.IO room membership are checked on the server. Startup requires a MongoDB URI and a JWT secret of at least 32 characters. Production use still requires HTTPS and environment-specific cookie/CORS verification. File upload validation is not implemented.
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+```
 
-## Roadmap
+`MONGODB_URI` and a `JWT_SECRET` of at least 32 characters are required for startup. Add valid Cloudinary credentials when using media functionality.
 
-1. Configure Atlas, run the documented two-account workflow, and fix integration issues.
-2. Add automated workflow tests and review access-control edge cases.
-3. Add media uploads after Cloudinary is configured.
-4. Add a moderation dashboard and complete deployment/demo verification.
+Generate a random JWT secret locally:
 
-## Known limitations
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
 
-No MongoDB-backed workflows have been exercised yet because Atlas configuration is not present. Media uploads, account deletion/data export, browser push, E2EE, groups/calls, and admin report review remain unimplemented. Reports are persisted, but there is no moderation dashboard yet. Cloudinary configuration will be added when media uploads are implemented. A 3–5 minute demo, final deployment, and official submission remain to be completed.
+Never commit `.env` files or share secret values.
+
+### Step 4: Configure the frontend
+
+Copy `frontend/.env.example` to `frontend/.env`.
+
+For local development, the default configuration is:
+
+```env
+VITE_API_URL=http://localhost:5000
+```
+
+The frontend environment variable contains the API's base URL, not private credentials.
+
+### Step 5: Run the application
+
+From the repository root:
+
+```bash
+npm run dev
+```
+
+This starts the frontend and backend development servers.
+
+- Frontend: http://localhost:5173
+- Backend health endpoint: http://localhost:5000/api/health
+
+To run the services separately, use two terminals:
+
+```bash
+npm run dev:backend
+```
+
+```bash
+npm run dev:frontend
+```
+
+## 8. Available Scripts
+
+Run these commands from the repository root.
+
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Start frontend and backend development servers |
+| `npm run dev:frontend` | Start the Vite frontend |
+| `npm run dev:backend` | Start the backend in development mode |
+| `npm run build` | Build the frontend for production |
+| `npm test` | Run the backend Node.js test suite |
+| `npm start` | Start the backend |
+
+## 9. Environment Variables
+
+### Backend — Render or local environment
+
+| Variable | Purpose |
+|---|---|
+| `NODE_ENV` | Runtime environment |
+| `PORT` | HTTP server port; Render supplies this in production |
+| `MONGODB_URI` | MongoDB connection string |
+| `JWT_SECRET` | Secret used for JWT signing |
+| `CLIENT_URL` | Allowed frontend origin for credentialed requests |
+| `CLOUDINARY_CLOUD_NAME` | Cloudinary cloud name |
+| `CLOUDINARY_API_KEY` | Cloudinary API key |
+| `CLOUDINARY_API_SECRET` | Private Cloudinary API secret |
+
+### Frontend — Vercel or local environment
+
+| Variable | Purpose |
+|---|---|
+| `VITE_API_URL` | Public base URL of the backend API |
+
+Do not put `MONGODB_URI`, `JWT_SECRET`, or `CLOUDINARY_API_SECRET` in frontend environment variables. Vite variables prefixed with `VITE_` are exposed to browser code.
+
+## 10. Deployment
+
+Chatz uses Vercel for the frontend, Render for the backend, MongoDB Atlas for persistent data, and Cloudinary for media storage.
+
+### Frontend — Vercel
+
+- Repository: `AbhayKumarMishra027/Chatz`
+- Root directory: `frontend`
+- Framework preset: Vite
+- Build command: `npm run build`
+- Output directory: `dist`
+- Environment variable: `VITE_API_URL=https://chatz-ulbz.onrender.com`
+
+The repository includes `frontend/vercel.json` to rewrite client-side routes to `index.html`.
+
+Live URL: https://chatz-khaki.vercel.app
+
+### Backend — Render
+
+- Repository: `AbhayKumarMishra027/Chatz`
+- Root directory: `backend`
+- Build command: `npm install`
+- Start command: `npm start`
+
+Configure the backend environment variables in Render. Set `NODE_ENV=production`, use the MongoDB Atlas connection string, configure a strong JWT secret, and set `CLIENT_URL` to the exact production frontend origin:
+
+```env
+CLIENT_URL=https://chatz-khaki.vercel.app
+```
+
+The backend exposes a health endpoint at:
+
+https://chatz-ulbz.onrender.com/api/health
+
+Expected response:
+
+```json
+{
+  "status": "ok",
+  "service": "chatz-api"
+}
+```
+
+### Production verification
+
+Deployment success alone does not prove that all workflows work. Verify registration, login, persistent sessions, posts, profile privacy, image uploads, and two-account messaging in production.
+
+Cross-origin cookies, CORS, and Socket.IO authentication must be configured correctly for the deployed origins. Render's free service may sleep when idle, which can cause a delay on the first request.
+
+## 11. Security Considerations
+
+The backend includes security and validation measures such as:
+
+- Password hashing with bcrypt
+- HttpOnly cookie-based authentication
+- JWT validation
+- Input validation using Zod
+- Helmet security headers
+- Credentialed CORS configuration
+- API rate limiting
+- Server-side authorization for protected resources
+- Privacy and block-related access checks
+
+Production deployment should use HTTPS, correctly scoped credentials, a strong JWT secret, and suitable database network access rules.
+
+## 12. Testing and Verification
+
+The repository includes backend tests and frontend test scripts.
+
+Run:
+
+```bash
+npm test
+npm run build
+```
+
+These commands help verify backend tests and frontend compilation. They do not, by themselves, establish that all live production workflows work.
+
+Important manual checks include:
+
+- Registration, login, logout, and session persistence
+- Profile editing and privacy rules
+- Follow/unfollow and private-account requests
+- Post visibility, likes, comments, and saved posts
+- User search, blocking, and reporting
+- Message requests, unread/read state, and real-time delivery
+- Cloudinary-backed media upload and delivery
+- Mobile layout and desktop regression checks
+
+## 13. Known Limitations
+
+- Production authentication and cross-origin cookie behavior must be verified after environment configuration.
+- Image functionality depends on correct Cloudinary configuration and production testing.
+- Mobile navigation and layout refinements remain planned.
+- The application does not currently claim end-to-end encryption, group conversations, voice/video calls, or a dedicated moderation dashboard.
+
+## 14. Demo Video and Submission
+
+The end-term project guidelines request a **3–5 minute demo video** showing the problem, target users, major workflows, interesting functionality, and the working application.
+
+Before final submission:
+
+- Confirm that the GitHub repository is accessible.
+- Verify the deployed application and backend health endpoint.
+- Test the important workflows using separate accounts.
+- Add the public demo video URL to this README.
+- Verify that all links work without requiring extra permissions.
+
+**Official submission form:**  
+https://forms.gle/sBy4sfqyiRG2Zpom9
+
+## 15. Author
+
+**Abhay Kumar*
+
+GitHub: [AbhayKumarMishra027](https://github.com/AbhayKumarMishra027)
+
+---
+
+*Chatz — A little space to connect.*
