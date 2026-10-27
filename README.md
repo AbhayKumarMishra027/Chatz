@@ -1,11 +1,11 @@
-# Chatz — A Little Space to Connect
+# Chatz - A Little Space to Connect
 
 **Chatz** is a full-stack social and messaging web application that brings community posts and private conversations together in one place.
 
 🔗 **Live Application:** https://chatz-khaki.vercel.app  
 ⚙️ **Backend API:** https://chatz-ulbz.onrender.com  
 💻 **GitHub Repository:** https://github.com/AbhayKumarMishra027/Chatz  
-🎬 **Demo Video:** [Watch Chatz Demo](YOUR_GOOGLE_DRIVE_LINK)
+🎬 **Demo Video:** [Watch Chatz Demo](https://drive.google.com/file/d/10h2JwzwB2O3oKwQyD9X76k_6eaXkkc04/view?usp=sharing)
 
 ---
 
@@ -361,4 +361,4 @@ GitHub: [AbhayKumarMishra027](https://github.com/AbhayKumarMishra027)
 
 ---
 
-*Chatz — A little space to connect.*
+*Chatz - A little space to connect.*
