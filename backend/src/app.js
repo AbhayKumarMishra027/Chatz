@@ -17,6 +17,7 @@ import { searchRoutes } from './routes/searchRoutes.js';
 import { mediaRoutes } from './routes/mediaRoutes.js';
 
 export const app = express();
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet());
 app.use(cors({ origin: env.CLIENT_URL, credentials: true }));
