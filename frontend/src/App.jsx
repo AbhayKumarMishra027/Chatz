@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, Bookmark, Compass, Home, LogOut, MessageCircle, Moon, Search, Settings, Sun, Users, X } from 'lucide-react';
+import { Bell, Bookmark, ChevronRight, Compass, Home, LogOut, Menu, MessageCircle, Moon, Search, Settings, Sun, Users, X } from 'lucide-react';
 import { io } from 'socket.io-client';
 import Cropper from 'react-easy-crop';
 import AuthPage from './pages/AuthPage.jsx';
@@ -21,6 +21,9 @@ const navItems = [
   ['/', 'Home', Home], ['/explore', 'Explore', Compass], ['/messages', 'Messages', MessageCircle],
   ['/notifications', 'Notifications', Bell], ['/saved', 'Saved', Bookmark], ['/profile', 'Profile', Users], ['/settings', 'Settings', Settings],
 ];
+const mobileNavItems = navItems.slice(0, 3);
+const mobileMoreNavItems = navItems.slice(3);
+const NotificationCountContext = createContext(0);
 const navColorClass = {
   '/': 'nav-home',
   '/explore': 'nav-explore',
@@ -34,14 +37,7 @@ const navColorClass = {
 function Sidebar() {
   const { user, logout } = useAuth();
   const [error, setError] = useState('');
-  const [unread, setUnread] = useState(0);
-  useEffect(() => {
-    api.get('/api/notifications').then(({ data }) => setUnread(data.unreadCount)).catch(() => {});
-    const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000', { withCredentials: true });
-    socket.on('notification:new', () => setUnread((count) => count + 1));
-    socket.on('notifications:count', ({ unreadCount }) => setUnread(unreadCount));
-    return () => socket.disconnect();
-  }, []);
+  const unread = useContext(NotificationCountContext);
   async function signOut() { try { await logout(); } catch (requestError) { setError(getApiError(requestError)); } }
   return <aside className="sidebar"><Brand /><div className="workspace-label">YOUR SPACE</div><nav className="main-nav" aria-label="Main navigation">
     {navItems.map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `nav-link ${navColorClass[to]}${isActive ? ' active' : ''}`}><Icon size={18} strokeWidth={1.8} /><span>{label}</span>{to === '/notifications' && unread > 0 && <i className="nav-count">{unread > 99 ? '99+' : unread}</i>}</NavLink>)}
@@ -50,12 +46,13 @@ function Sidebar() {
 
 function ThemeButton({ theme, onToggle }) {
   const Icon = theme === 'light' ? Moon : Sun;
-  return <button className="icon-button" onClick={onToggle} aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}><Icon size={18} /></button>;
+  return <button className="icon-button theme-toggle-button" onClick={onToggle} aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}><Icon size={18} /></button>;
 }
 
-function Topbar({ title }) {
+function Topbar({ title, onOpenMobileMenu, mobileMenuOpen = false }) {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const unread = useContext(NotificationCountContext);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState({ users: [], posts: [] });
   const [searchOpen, setSearchOpen] = useState(false);
@@ -74,7 +71,7 @@ function Topbar({ title }) {
     return () => { alive = false; clearTimeout(timer); };
   }, [query]);
   function goTo(path) { setSearchOpen(false); setQuery(''); navigate(path); }
-  return <header className="topbar"><div className="topbar-context"><div className="mobile-brand"><Brand /></div><div className="breadcrumbs">Chatz <span>/</span> <strong>{title}</strong></div></div><div className="topbar-actions"><form className={`search-control${searchOpen ? ' open' : ''}`} role="search" onClick={() => { if (!searchOpen) setSearchOpen(true); }} onSubmit={(event) => { event.preventDefault(); setSearchOpen(true); }}><button type="button" className="search-expand" onClick={() => setSearchOpen(true)} aria-label="Open search"><Search size={16} /></button><input value={query} onKeyDown={(event) => { if (event.key === 'Escape') setSearchOpen(false); }} onFocus={() => setSearchOpen(true)} onChange={(event) => { setQuery(event.target.value); setResults({ users: [], posts: [] }); setSearchOpen(true); }} placeholder="Search people and posts" aria-label="Search people and posts" /><kbd>⌘ K</kbd>{searchOpen && <button type="button" className="search-close" onClick={() => setSearchOpen(false)} aria-label="Close search"><X size={15} /></button>}{searchOpen && (query.trim().length > 0) && <div className="search-results" role="region" aria-label="Search results">{searchLoading ? <div className="search-state">Searching Chatz…</div> : searchError ? <div className="search-state search-error">{searchError}</div> : query.trim().length < 2 ? <div className="search-state">Type at least 2 characters.</div> : !results.users.length && !results.posts.length ? <div className="search-state">No people or posts found.</div> : <><div className="search-group-label">PEOPLE</div>{results.users.length ? results.users.map((person) => <button type="button" className="search-result" key={person._id} onClick={() => goTo(`/u/${person.username}`)}><Avatar className="search-avatar" src={person.avatarUrl} name={person.displayName} userId={person._id} size={34} /><span><strong>{person.displayName}</strong><small>@{person.username}{person.isPrivate ? ' · Private' : ''}</small></span></button>) : <div className="search-state compact">No matching people.</div>}<div className="search-group-label">POSTS</div>{results.posts.length ? results.posts.map((post) => <button type="button" className="search-result search-post-result" key={post._id} onClick={() => goTo(`/p/${post._id}`)}><span><strong>{post.author.displayName}</strong><small>{post.text}</small></span></button>) : <div className="search-state compact">No matching posts.</div>}</>}</div>}</form><ThemeButton theme={document.documentElement.dataset.theme || 'light'} onToggle={() => window.dispatchEvent(new Event('toggle-theme'))} /><NavLink to="/profile" className="avatar-link" title={user.displayName} aria-label={`Open ${user.displayName}'s profile`}><Avatar className="avatar-top" src={user.avatarUrl} name={user.displayName} userId={user._id} size={31} loading="eager" /></NavLink></div></header>;
+  return <header className="topbar"><div className="topbar-context"><button type="button" className="mobile-menu-button" onClick={onOpenMobileMenu} aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open more navigation'} aria-haspopup="dialog" aria-expanded={mobileMenuOpen} aria-controls="mobile-navigation-drawer">{mobileMenuOpen ? <X size={19} /> : <Menu size={19} />}</button><div className="mobile-brand"><Brand /></div><div className="breadcrumbs">Chatz <span>/</span> <strong>{title}</strong></div></div><div className="topbar-actions"><form className={`search-control${searchOpen ? ' open' : ''}`} role="search" onClick={() => { if (!searchOpen) setSearchOpen(true); }} onSubmit={(event) => { event.preventDefault(); setSearchOpen(true); }}><button type="button" className="search-expand" onClick={() => setSearchOpen(true)} aria-label="Open search"><Search size={16} /></button><input value={query} onKeyDown={(event) => { if (event.key === 'Escape') setSearchOpen(false); }} onFocus={() => setSearchOpen(true)} onChange={(event) => { setQuery(event.target.value); setResults({ users: [], posts: [] }); setSearchOpen(true); }} placeholder="Search people and posts" aria-label="Search people and posts" /><kbd>⌘ K</kbd>{searchOpen && <button type="button" className="search-close" onClick={() => setSearchOpen(false)} aria-label="Close search"><X size={15} /></button>}{searchOpen && (query.trim().length > 0) && <div className="search-results" role="region" aria-label="Search results">{searchLoading ? <div className="search-state">Searching Chatz…</div> : searchError ? <div className="search-state search-error">{searchError}</div> : query.trim().length < 2 ? <div className="search-state">Type at least 2 characters.</div> : !results.users.length && !results.posts.length ? <div className="search-state">No people or posts found.</div> : <><div className="search-group-label">PEOPLE</div>{results.users.length ? results.users.map((person) => <button type="button" className="search-result" key={person._id} onClick={() => goTo(`/u/${person.username}`)}><Avatar className="search-avatar" src={person.avatarUrl} name={person.displayName} userId={person._id} size={34} /><span><strong>{person.displayName}</strong><small>@{person.username}{person.isPrivate ? ' · Private' : ''}</small></span></button>) : <div className="search-state compact">No matching people.</div>}<div className="search-group-label">POSTS</div>{results.posts.length ? results.posts.map((post) => <button type="button" className="search-result search-post-result" key={post._id} onClick={() => goTo(`/p/${post._id}`)}><span><strong>{post.author.displayName}</strong><small>{post.text}</small></span></button>) : <div className="search-state compact">No matching posts.</div>}</>}</div>}</form><NavLink to="/notifications" className="mobile-notifications-link" aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ''}`} title="Notifications"><Bell size={18} />{unread > 0 && <i className="nav-count">{unread > 99 ? '99+' : unread}</i>}</NavLink><ThemeButton theme={document.documentElement.dataset.theme || 'light'} onToggle={() => window.dispatchEvent(new Event('toggle-theme'))} /><NavLink to="/profile" className="avatar-link" title={user.displayName} aria-label={`Open ${user.displayName}'s profile`}><Avatar className="avatar-top" src={user.avatarUrl} name={user.displayName} userId={user._id} size={31} loading="eager" /></NavLink></div></header>;
 }
 
 function HomeRightRail({ className = '', showSuggestions = true }) {
@@ -145,9 +142,9 @@ function PageHeading({ eyebrow, title, subtitle, icon: Icon, className = '' }) {
   return <section className={`page-heading${className ? ` ${className}` : ''}`}><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{subtitle}</p></div><div className="heading-illustration"><div className="illustration-ring ring-one" /><div className="illustration-ring ring-two" /><Icon size={26} strokeWidth={1.4} /></div></section>;
 }
 
-function HomePageLayout({ title, subtitle, Icon }) {
+function HomePageLayout({ title, subtitle, Icon, onOpenMobileMenu, mobileMenuOpen }) {
   return <main className="main-content">
-    <Topbar title={title} />
+    <Topbar title={title} onOpenMobileMenu={onOpenMobileMenu} mobileMenuOpen={mobileMenuOpen} />
     <div className="content-grid home-content-grid">
       <section className="feed-column home-main-column" aria-label="Your feed and post composer">
         <PageHeading eyebrow="YOUR COMMUNITY" title="Home" subtitle={subtitle} icon={Icon} className="home-page-heading" />
@@ -158,9 +155,9 @@ function HomePageLayout({ title, subtitle, Icon }) {
   </main>;
 }
 
-function ExplorePageLayout({ title, subtitle, Icon }) {
+function ExplorePageLayout({ title, subtitle, Icon, onOpenMobileMenu, mobileMenuOpen }) {
   return <main className="main-content">
-    <Topbar title={title} />
+    <Topbar title={title} onOpenMobileMenu={onOpenMobileMenu} mobileMenuOpen={mobileMenuOpen} />
     <PageHeading eyebrow="DISCOVERY" title="Explore" subtitle="Find accounts and public conversations." icon={Icon} className="explore-page-heading" />
     <div className="content-grid explore-content-grid">
       <section className="feed-column explore-main-column" aria-label="Explore people and public posts"><ExplorePage /></section>
@@ -561,10 +558,10 @@ function ComingSoon({ title, text, icon: Icon }) {
   return <div className="social-empty"><div className="empty-icon"><Icon size={18} /></div><h3>{title}</h3><p>{text}</p></div>;
 }
 
-function MainContent() {
+function MainContent({ onOpenMobileMenu, mobileMenuOpen }) {
   const { pathname } = useLocation();
-  if (pathname.startsWith('/p/')) return <main className="main-content"><Topbar title="Post" /><PageHeading eyebrow="FROM THE COMMUNITY" title="Post" subtitle="A conversation from Chatz." icon={MessageCircle} /><div className="single-column-content"><PostDetail postId={pathname.split('/')[2]} /></div></main>;
-  if (pathname.startsWith('/u/')) return <main className="main-content"><Topbar title="Profile" /><PageHeading eyebrow="YOUR PEOPLE" title="A Chatz profile" subtitle="Get to know someone from the community." icon={Users} /><div className="content-grid"><section className="feed-column"><PublicProfilePage username={pathname.split('/')[2]} /></section><aside className="right-rail"><div className="rail-card discover-card"><div className="rail-card-header"><div><span className="section-kicker">FIND YOUR PEOPLE</span><h3>Explore</h3></div><Compass size={19} /></div><NavLink className="rail-link" to="/explore">Back to Explore <span>→</span></NavLink></div></aside></div></main>;
+  if (pathname.startsWith('/p/')) return <main className="main-content"><Topbar title="Post" onOpenMobileMenu={onOpenMobileMenu} mobileMenuOpen={mobileMenuOpen} /><PageHeading eyebrow="FROM THE COMMUNITY" title="Post" subtitle="A conversation from Chatz." icon={MessageCircle} /><div className="single-column-content"><PostDetail postId={pathname.split('/')[2]} /></div></main>;
+  if (pathname.startsWith('/u/')) return <main className="main-content"><Topbar title="Profile" onOpenMobileMenu={onOpenMobileMenu} mobileMenuOpen={mobileMenuOpen} /><PageHeading eyebrow="YOUR PEOPLE" title="A Chatz profile" subtitle="Get to know someone from the community." icon={Users} /><div className="content-grid"><section className="feed-column"><PublicProfilePage username={pathname.split('/')[2]} /></section><aside className="right-rail"><div className="rail-card discover-card"><div className="rail-card-header"><div><span className="section-kicker">FIND YOUR PEOPLE</span><h3>Explore</h3></div><Compass size={19} /></div><NavLink className="rail-link" to="/explore">Back to Explore <span>→</span></NavLink></div></aside></div></main>;
   const pages = {
     '/': ['Home', 'Share ideas. Keep up with your community.', Home],
     '/explore': ['Explore', 'Find accounts and public conversations.', Compass],
@@ -575,20 +572,85 @@ function MainContent() {
     '/settings': ['Settings', 'Make Chatz feel like your space.', Settings],
   };
   const [title, subtitle, Icon] = pages[pathname] || pages['/'];
-  if (pathname === '/explore') return <ExplorePageLayout title={title} subtitle={subtitle} Icon={Icon} />;
-  if (pathname === '/profile') return <main className="main-content profile-main-content"><Topbar title={title} /><div className="single-column-content profile-page-content"><ProfilePage /></div></main>;
-  if (pathname === '/saved') return <main className="main-content"><Topbar title={title} /><div className="content-grid saved-content-grid saved-page-content"><section className="feed-column"><SocialPage mode="saved" /></section><HomeRightRail className="saved-right-rail" /></div></main>;
-  if (pathname === '/messages') return <main className="main-content"><Topbar title={title} /><PageHeading eyebrow="GOOD CONVERSATIONS" title={title} subtitle={subtitle} icon={Icon} className="messages-page-heading" /><div className="messages-page-content"><MessagesPage /></div></main>;
-  if (pathname === '/notifications') return <main className="main-content"><Topbar title={title} /><PageHeading eyebrow="YOUR UPDATES" title={title} subtitle="A timeline of follows, replies and messages." icon={Icon} className="notifications-page-heading" /><div className="content-grid notifications-content-grid"><section className="feed-column"><NotificationsPage /></section><HomeRightRail className="notifications-right-rail" /></div></main>;
-  if (pathname === '/settings') return <main className="main-content settings-main-content"><Topbar title={title} /><div className="content-grid settings-content-grid"><section className="feed-column"><SettingsPage /></section><HomeRightRail className="settings-right-rail" /></div></main>;
-  return <HomePageLayout title={pages['/'][0]} subtitle={pages['/'][1]} Icon={pages['/'][2]} />;
+  if (pathname === '/explore') return <ExplorePageLayout title={title} subtitle={subtitle} Icon={Icon} onOpenMobileMenu={onOpenMobileMenu} mobileMenuOpen={mobileMenuOpen} />;
+  if (pathname === '/profile') return <main className="main-content profile-main-content"><Topbar title={title} onOpenMobileMenu={onOpenMobileMenu} mobileMenuOpen={mobileMenuOpen} /><div className="single-column-content profile-page-content"><ProfilePage /></div></main>;
+  if (pathname === '/saved') return <main className="main-content"><Topbar title={title} onOpenMobileMenu={onOpenMobileMenu} mobileMenuOpen={mobileMenuOpen} /><div className="content-grid saved-content-grid saved-page-content"><section className="feed-column"><SocialPage mode="saved" /></section><HomeRightRail className="saved-right-rail" /></div></main>;
+  if (pathname === '/messages') return <main className="main-content"><Topbar title={title} onOpenMobileMenu={onOpenMobileMenu} mobileMenuOpen={mobileMenuOpen} /><PageHeading eyebrow="GOOD CONVERSATIONS" title={title} subtitle={subtitle} icon={Icon} className="messages-page-heading" /><div className="messages-page-content"><MessagesPage /></div></main>;
+  if (pathname === '/notifications') return <main className="main-content"><Topbar title={title} onOpenMobileMenu={onOpenMobileMenu} mobileMenuOpen={mobileMenuOpen} /><PageHeading eyebrow="YOUR UPDATES" title={title} subtitle="A timeline of follows, replies and messages." icon={Icon} className="notifications-page-heading" /><div className="content-grid notifications-content-grid"><section className="feed-column"><NotificationsPage /></section><HomeRightRail className="notifications-right-rail" /></div></main>;
+  if (pathname === '/settings') return <main className="main-content settings-main-content"><Topbar title={title} onOpenMobileMenu={onOpenMobileMenu} mobileMenuOpen={mobileMenuOpen} /><div className="content-grid settings-content-grid"><section className="feed-column"><SettingsPage /></section><HomeRightRail className="settings-right-rail" /></div></main>;
+  return <HomePageLayout title={pages['/'][0]} subtitle={pages['/'][1]} Icon={pages['/'][2]} onOpenMobileMenu={onOpenMobileMenu} mobileMenuOpen={mobileMenuOpen} />;
 }
 
 function ProtectedShell() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
+  const { pathname } = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
+  const [unread, setUnread] = useState(0);
+  const menuButtonRef = useRef(null);
+  const drawerRef = useRef(null);
+  const closeMobileMenu = () => setMobileMenuOpen(false);
+  const toggleMobileMenu = () => {
+    if (mobileMenuOpen) {
+      closeMobileMenu();
+      return;
+    }
+    menuButtonRef.current = document.activeElement;
+    setMobileMenuOpen(true);
+  };
+
+  useEffect(() => { closeMobileMenu(); }, [pathname]);
+
+  useEffect(() => {
+    if (loading || !user) return undefined;
+    api.get('/api/notifications').then(({ data }) => setUnread(data.unreadCount)).catch(() => {});
+    const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000', { withCredentials: true });
+    socket.on('notification:new', () => setUnread((count) => count + 1));
+    socket.on('notifications:count', ({ unreadCount }) => setUnread(unreadCount));
+    return () => socket.disconnect();
+  }, [loading, user?._id]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    drawerRef.current?.querySelector('a[href], button:not([disabled])')?.focus();
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        closeMobileMenu();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = [...document.querySelectorAll('.app-shell.mobile-menu-open .topbar a[href], .app-shell.mobile-menu-open .topbar button:not([disabled]), .mobile-navigation-drawer a[href], .mobile-navigation-drawer button:not([disabled])')]
+        .filter((element) => element.getClientRects().length > 0);
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+      menuButtonRef.current?.focus();
+    };
+  }, [mobileMenuOpen]);
+
+  async function signOut() {
+    setLogoutError('');
+    try { await logout(); }
+    catch (requestError) { setLogoutError(getApiError(requestError)); }
+  }
+
   if (loading) return <div className="auth-loading">Opening your space…</div>;
   if (!user) return <Navigate to="/login" replace />;
-  return <div className="app-shell"><Sidebar /><Routes><Route path="*" element={<MainContent />} /></Routes><nav className="mobile-nav" aria-label="Mobile navigation">{navItems.map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `mobile-nav-link ${navColorClass[to]}${isActive ? ' active' : ''}`}><Icon size={19} /><span>{label}</span></NavLink>)}</nav></div>;
+  return <NotificationCountContext.Provider value={unread}><div className={`app-shell${mobileMenuOpen ? ' mobile-menu-open' : ''}`}><Sidebar /><Routes><Route path="*" element={<MainContent onOpenMobileMenu={toggleMobileMenu} mobileMenuOpen={mobileMenuOpen} />} /></Routes><nav className="mobile-nav" aria-label="Primary mobile navigation">{mobileNavItems.map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `mobile-nav-link ${navColorClass[to]}${isActive ? ' active' : ''}`}><Icon size={19} /><span>{label}</span></NavLink>)}</nav>{mobileMenuOpen && <div className="mobile-menu-layer"><button type="button" className="mobile-menu-backdrop" onClick={closeMobileMenu} aria-label="Close navigation menu" /><aside id="mobile-navigation-drawer" className="mobile-navigation-drawer" role="dialog" aria-modal="true" aria-label="Main navigation" ref={drawerRef}><NavLink to="/profile" className="mobile-drawer-account" onClick={closeMobileMenu}><Avatar className="avatar-you" src={user.avatarUrl} name={user.displayName} userId={user._id} size={42} /><span><strong>{user.displayName}</strong><small>@{user.username}</small></span><ChevronRight size={19} aria-hidden="true" /></NavLink><nav className="mobile-drawer-nav" aria-label="Main navigation"><div className="mobile-drawer-group">{mobileNavItems.map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `mobile-drawer-link ${navColorClass[to]}${isActive ? ' active' : ''}`} onClick={closeMobileMenu}><Icon size={20} strokeWidth={1.8} /><span>{label}</span></NavLink>)}</div><div className="mobile-drawer-divider" aria-hidden="true" /><div className="mobile-drawer-group">{mobileMoreNavItems.map(([to, label, Icon]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `mobile-drawer-link ${navColorClass[to]}${isActive ? ' active' : ''}`} onClick={closeMobileMenu}><Icon size={20} strokeWidth={1.8} /><span>{label}</span></NavLink>)}</div></nav><div className="mobile-drawer-actions">{logoutError && <p className="inline-error" role="alert">{logoutError}</p>}<div className="mobile-drawer-divider" aria-hidden="true" /><button type="button" className="mobile-drawer-signout" onClick={signOut}><LogOut size={20} strokeWidth={1.8} /><span>Sign out</span></button><div className="mobile-drawer-brand"><strong>chatz.</strong><span>v0.1.0</span></div></div></aside></div>}</div></NotificationCountContext.Provider>;
 }
 
 export default function App() {

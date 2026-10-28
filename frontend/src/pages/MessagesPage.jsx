@@ -34,6 +34,7 @@ export default function MessagesPage({ initialConversationId = null, quickChat =
   const [busy, setBusy] = useState(false);
   const [mobileChat, setMobileChat] = useState(false);
   const [messageMenu, setMessageMenu] = useState(null);
+  const [mobileActionsMessageId, setMobileActionsMessageId] = useState(null);
   const socketRef = useRef(null);
   const bottomRef = useRef(null);
   const typingTimer = useRef(null);
@@ -90,11 +91,14 @@ export default function MessagesPage({ initialConversationId = null, quickChat =
     }
   }, [initialConversationId, conversations, active?._id]);
 
-  useEffect(() => { setMessageMenu(null); }, [active?._id]);
+  useEffect(() => { setMessageMenu(null); setMobileActionsMessageId(null); }, [active?._id]);
 
   useEffect(() => {
     if (!messageMenu) return undefined;
-    const closeMenu = () => setMessageMenu(null);
+    const closeMenu = () => {
+      setMessageMenu(null);
+      setMobileActionsMessageId(null);
+    };
     const handlePointerDown = (event) => {
       if (!messageMenuRef.current?.contains(event.target) && !messageMenuButtonRef.current?.contains(event.target)) closeMenu();
     };
@@ -193,6 +197,7 @@ export default function MessagesPage({ initialConversationId = null, quickChat =
       await api.delete(`/api/messages/message/${message._id}${everyone ? '/everyone' : ''}`);
       setMessages((current) => current.map((item) => item._id !== message._id ? item : ({ ...item, text: everyone ? 'This message was deleted.' : 'You deleted this message.', deletedForMe: !everyone, deletedForEveryone: everyone })));
       setMessageMenu(null);
+      setMobileActionsMessageId(null);
     } catch (requestError) { setError(getApiError(requestError)); }
   }
 
@@ -226,9 +231,13 @@ export default function MessagesPage({ initialConversationId = null, quickChat =
       <div className="message-history" aria-live="polite">{loading ? <div className="feed-loading" role="status">Opening conversation…</div> : messages.length ? messages.map((message) => {
         const own = message.sender?._id === user._id;
         const recipientRead = own && message.readBy?.some((readerId) => readerId.toString() === active.participant._id.toString());
-        return <div className={`message-line${own ? ' own' : ''}${messageMenu?.messageId === message._id ? ' has-message-menu' : ''}`} key={message._id}>
+        return <div className={`message-line${own ? ' own' : ''}${messageMenu?.messageId === message._id ? ' has-message-menu' : ''}${mobileActionsMessageId === message._id ? ' mobile-actions-visible' : ''}`} key={message._id} onClick={(event) => {
+          if (own && window.matchMedia('(hover: none), (max-width: 600px)').matches && !event.target.closest('button')) {
+            setMobileActionsMessageId((current) => current === message._id ? null : message._id);
+          }
+        }}>
           <div className="message-stack">
-            {own && <button type="button" className="message-menu-trigger" ref={messageMenu?.messageId === message._id ? messageMenuButtonRef : null} aria-label="Message actions" aria-haspopup="menu" aria-expanded={messageMenu?.messageId === message._id} onClick={(event) => toggleMessageMenu(event, message)}><MoreVertical size={17} aria-hidden="true" /></button>}
+            {own && <button type="button" className="message-menu-trigger" ref={messageMenu?.messageId === message._id ? messageMenuButtonRef : null} aria-label="Message actions" aria-haspopup="menu" aria-expanded={messageMenu?.messageId === message._id} onClick={(event) => { event.stopPropagation(); toggleMessageMenu(event, message); }}><MoreVertical size={17} aria-hidden="true" /></button>}
             <div className="message-bubble"><span className="message-sender">{own ? 'You' : message.sender?.displayName || active.participant.displayName}</span><p>{message.text}</p></div>
             <div className="message-meta">
               <div className="message-meta-details"><time>{new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>{own && <span className={`message-receipt${recipientRead ? ' is-read' : ''}`} aria-label={recipientRead ? 'Seen by recipient' : 'Sent'}>{recipientRead ? 'Seen' : 'Sent'}</span>}</div>
